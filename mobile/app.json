@@ -1,15 +1,15 @@
 {
   "expo": {
     "name": "WeParkit",
-    "slug": "icestation-ub",
-    "scheme": "icestation",
+    "slug": "weparkit",
+    "scheme": "weparkit",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#04060E",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "edu.buffalo.icestation",
+      "bundleIdentifier": "com.weparkit.app",
       "infoPlist": {
         "NSCameraUsageDescription": "WeParkit uses the camera to scan parking lots and icy walkways.",
         "NSPhotoLibraryUsageDescription": "WeParkit lets you pick a lot or walkway photo to analyse.",
@@ -20,7 +20,7 @@
       }
     },
     "android": {
-      "package": "edu.buffalo.icestation",
+      "package": "com.weparkit.app",
       "permissions": [
         "CAMERA",
         "ACCESS_COARSE_LOCATION",

@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=str(BASE_DIR / ".env"), extra="ignore")
 
     app_name: str = "WeParkit"
-    database_url: str = f"sqlite:///{(DATA_DIR / 'icestation.db').as_posix()}"
+    database_url: str = f"sqlite:///{(DATA_DIR / 'weparkit.db').as_posix()}"
     cors_origins: str = "http://localhost:8081,http://127.0.0.1:8081"  # Expo web; native apps ignore CORS
     # Expo web opened from another device on the LAN (e.g. http://192.168.1.20:8081). Private ranges only.
     cors_origin_regex: str = (r"^https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+"

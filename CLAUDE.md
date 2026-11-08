@@ -1,4 +1,4 @@
-# CLAUDE.md: WeParkit (repo: icestation-ub)
+# CLAUDE.md: WeParkit
 
 Hackathon prototype (UB Hacking 2026, theme Deep Space). Satellite-triggered winter parking and
 walkway-safety app for UB North Campus. Read README.md for the product pitch and run steps.

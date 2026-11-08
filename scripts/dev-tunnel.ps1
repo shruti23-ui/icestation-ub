@@ -1,4 +1,4 @@
-# Run IceStation on a phone when the network blocks phone<->laptop traffic (eduroam, UB Secure).
+# Run WeParkit on a phone when the network blocks phone<->laptop traffic (eduroam, UB Secure).
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\dev-tunnel.ps1
 #
@@ -28,8 +28,8 @@ if (-not (npm ls -g @expo/ngrok 2>$null | Select-String "ngrok")) {
   npm install -g "@expo/ngrok@^4.1.0"
 }
 
-$log = Join-Path $env:TEMP "icestation-cloudflared.log"
-$out = Join-Path $env:TEMP "icestation-cloudflared.out"
+$log = Join-Path $env:TEMP "weparkit-cloudflared.log"
+$out = Join-Path $env:TEMP "weparkit-cloudflared.out"
 Remove-Item $log, $out -ErrorAction SilentlyContinue
 $tunnel = Start-Process -FilePath $cf -ArgumentList "tunnel", "--no-autoupdate", "--url", "http://localhost:8000" `
   -RedirectStandardError $log -RedirectStandardOutput $out -PassThru -WindowStyle Hidden

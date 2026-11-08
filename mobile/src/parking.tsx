@@ -6,7 +6,8 @@ import { api, type ParkingSession } from "./api";
 import { decide, lotAt, metersBetween, type Fix } from "./parkDetect";
 import { useStore } from "./store";
 
-const AUTO_KEY = "icestation_auto_detect";
+const AUTO_KEY = "weparkit_auto_detect";
+const LEGACY_AUTO_KEY = "icestation_auto_detect";  // pre-rename key, read once
 const CAMPUS_RADIUS_M = 2500;   // farther than this from every UB lot = not on North Campus
 // "Yes, I'm parked" is the student telling us they're parked, so accept the nearest UB lot this close
 // even if GPS puts them just outside its outline (big lots, GPS drift, parked at the edge).
@@ -67,7 +68,7 @@ export function ParkingProvider({ children }: { children: ReactNode }) {
   // Location is the core of the main page, so ask as soon as the app opens (unless the user turned it off).
   useEffect(() => {
     (async () => {
-      const saved = await AsyncStorage.getItem(AUTO_KEY).catch(() => null);
+      const saved = (await AsyncStorage.getItem(AUTO_KEY).catch(() => null)) ?? (await AsyncStorage.getItem(LEGACY_AUTO_KEY).catch(() => null));
       if (saved === "off") { setGps("off"); return; }
       const perm = await Location.requestForegroundPermissionsAsync().catch(() => null);
       if (perm?.granted) setAuto(true);

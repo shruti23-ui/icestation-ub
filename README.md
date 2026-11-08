@@ -7,7 +7,7 @@ open spaces, and a NOAA GOES-19 weather satellite switches the whole app into ic
 the snow arrives.
 
 ```
-icestation-ub/
+weparkit/
 ├── backend/          Python FastAPI + SQLAlchemy + SQLite + OpenCV   (complete, 120 tests passing)
 │   ├── app/
 │   │   ├── main.py             app, WebSocket /ws, media, expiry loop
