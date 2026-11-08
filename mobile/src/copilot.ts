@@ -11,14 +11,14 @@ export interface ChatMessage { id: number; role: "user" | "assistant"; text: str
 
 // Voice-activity detection on the recorder's metering (dBFS). The noise floor is measured for the first
 // moments of each turn, so a noisy car and a quiet room both work.
-const POLL_MS = 120;
-const CALIBRATE_MS = 360;
-const SPEECH_OVER_FLOOR_DB = 10;     // louder than this above the floor = talking
-const SILENCE_OVER_FLOOR_DB = 5;     // back under this = pause
-const END_OF_SPEECH_MS = 1100;       // pause long enough to mean "I'm done"
-const NO_SPEECH_TIMEOUT_MS = 7000;   // nobody said anything: end the conversation
-const MAX_TURN_MS = 15000;
-const FALLBACK_TURN_MS = 6000;       // platforms without metering (some browsers): fixed window, tap to send early
+const POLL_MS = 100;
+const CALIBRATE_MS = 250;
+const SPEECH_OVER_FLOOR_DB = 7;      // louder than this above the floor = talking
+const SILENCE_OVER_FLOOR_DB = 6;      // back under this = pause
+const END_OF_SPEECH_MS = 650;        // pause long enough to mean "I'm done" (snappy response)
+const NO_SPEECH_TIMEOUT_MS = 4000;   // nobody said anything: end the conversation
+const MAX_TURN_MS = 8000;            // max turn duration
+const FALLBACK_TURN_MS = 3500;       // platforms without metering (some browsers): fixed window, tap to send early
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -50,7 +50,7 @@ export function useCopilot(opts: { destination: string; arrival?: string; access
     recorder.record();
     const t0 = Date.now();
     const floor: number[] = [];
-    let spoke = false, quietSince = 0, metered = false;
+    let spoke = false, quietSince = 0, metered = false, peak = -100;
     run.current.sendNow = false;
     try {
       while (run.current.active && !run.current.sendNow) {
@@ -61,9 +61,13 @@ export function useCopilot(opts: { destination: string; arrival?: string; access
           metered = true;
           setLevel(Math.max(0, Math.min(1, (db + 60) / 50)));
           if (elapsed < CALIBRATE_MS) { floor.push(db); continue; }
-          const base = floor.length ? floor.reduce((a, b) => a + b, 0) / floor.length : -55;
-          if (db > base + SPEECH_OVER_FLOOR_DB) { spoke = true; quietSince = 0; }
-          else if (spoke && db < base + SILENCE_OVER_FLOOR_DB) {
+          const rawBase = floor.length ? Math.min(...floor) : -55;
+          const base = Math.min(-38, rawBase);
+          if (db > base + SPEECH_OVER_FLOOR_DB) {
+            spoke = true;
+            quietSince = 0;
+            if (db > peak) peak = db;
+          } else if (spoke && (db < base + SILENCE_OVER_FLOOR_DB || (peak > -45 && db < peak - 11))) {
             quietSince ||= Date.now();
             if (Date.now() - quietSince >= END_OF_SPEECH_MS) break;
           }

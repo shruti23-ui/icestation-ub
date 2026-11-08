@@ -164,12 +164,17 @@ export function Banner({ tone = "neutral", icon, title, children, onPress, right
 }) {
   const { c } = useStore();
   const { fg, bg } = toneColors(c, tone);
+  const renderSlot = (node: ReactNode, variant: "subheading" | "caption", color?: string) => {
+    if (node == null) return null;
+    if (isValidElement(node)) return node;
+    return <T v={variant} color={color}>{node}</T>;
+  };
   const inner = (
     <View style={[row.gap, { alignItems: "flex-start", gap: space.md }]}>
       {icon && <View style={{ marginTop: 1 }}>{icon}</View>}
       <View style={{ flex: 1, gap: 2 }}>
-        {title != null && (typeof title === "string" ? <T v="subheading" color={tone === "neutral" ? c.text : fg}>{title}</T> : title)}
-        {children != null && (typeof children === "string" ? <T v="caption" color={tone === "neutral" ? c.textMuted : c.text}>{children}</T> : children)}
+        {renderSlot(title, "subheading", tone === "neutral" ? c.text : fg)}
+        {renderSlot(children, "caption", tone === "neutral" ? c.textMuted : c.text)}
       </View>
       {right}
     </View>
@@ -285,9 +290,9 @@ export function Chips<V extends string>({ options, value, onChange }: {
         const on = o.value === value;
         return (
           <Pressable key={o.value} onPress={() => onChange(o.value)} accessibilityRole="button" accessibilityState={{ selected: on }}
-            style={{ borderWidth: StyleSheet.hairlineWidth * 2, borderColor: on ? c.accent : c.border, backgroundColor: on ? c.accentSoft : "transparent",
+            style={{ borderWidth: StyleSheet.hairlineWidth * 2, borderColor: on ? c.warn : c.border, backgroundColor: on ? c.warnSoft : "transparent",
               borderRadius: radius.md, paddingHorizontal: space.md, paddingVertical: 7 }}>
-            <Text style={{ color: on ? c.accent : c.text, fontSize: 13, fontWeight: "500" }}>{o.label}</Text>
+            <Text style={{ color: on ? c.warn : c.text, fontSize: 13, fontWeight: "600" }}>{o.label}</Text>
           </Pressable>
         );
       })}

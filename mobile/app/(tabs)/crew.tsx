@@ -44,14 +44,13 @@ export default function Profile() {
       {user && (
         <>
           <Metrics items={[
-            { label: "Points", value: user.points.toLocaleString(), color: c.accent },
-            { label: "Rank", value: `#${user.rank ?? "—"}` },
-            { label: "Reports", value: user.reports_submitted },
-            { label: "Verified", value: user.hazards_verified },
+            { label: "Reports", value: user.reports_submitted, color: c.accent },
+            { label: "Walkway verified", value: user.hazards_verified },
+            { label: "Community karma", value: user.points.toLocaleString() },
           ]} />
           <Card padded={false}>
-            <ListRow title="Receive help requests" subtitle="Get notified when someone nearby is stuck"
-              right={<Toggle value={user.accepts_assist_requests} onChange={toggleHelp} label="Receive help requests" />} />
+            <ListRow title="Winter roadside assist" subtitle="Receive notification if a student nearby is stuck in snow"
+              right={<Toggle value={user.accepts_assist_requests} onChange={toggleHelp} label="Winter roadside assist" />} />
           </Card>
         </>
       )}
@@ -59,14 +58,14 @@ export default function Profile() {
       <Section title="Account">
         <Card padded={false}>
           <List>
-            <ListRow title={auth.account?.email ?? "Not signed in"} subtitle={auth.account ? "Signed in" : undefined} />
+            <ListRow title={auth.account?.email ?? "Not signed in"} subtitle={auth.account ? "UB Verified Account" : undefined} />
             <ListRow title={<T v="subheading" color={c.danger}>Log out</T>} left={<LogOut size={18} color={c.danger} />} onPress={auth.logout} />
           </List>
         </Card>
       </Section>
 
-      <Section title="Help requests">
-        {requests.length === 0 ? <Empty art={<Alien size={52} />} title="No open requests">If your car is stuck, request help from the Plan tab.</Empty> : (
+      <Section title="Help requests nearby">
+        {requests.length === 0 ? <Empty art={<Alien size={52} />} title="No stuck cars reported">If your car is stuck in snow or ice, tap 'Request help' from the Plan tab.</Empty> : (
           <Card padded={false}>
             <List>
               {requests.map((n) => (
@@ -78,26 +77,7 @@ export default function Profile() {
         )}
       </Section>
 
-      <Section title="Leaderboard">
-        {board.length === 0 ? <Empty title="No one yet" /> : (
-          <Card padded={false}>
-            <List>
-              {board.map((u) => (
-                <ListRow key={u.id}
-                  left={<T v="label" style={{ width: 24, fontVariant: ["tabular-nums"] }} color={u.id === user?.id ? c.accent : undefined}>{u.rank}</T>}
-                  title={<View style={row.gap}>
-                    <T v="subheading" color={u.id === user?.id ? c.accent : undefined}>{u.handle}{u.id === user?.id ? " (you)" : ""}</T>
-                    {u.is_seed && <Badge>Sample</Badge>}
-                  </View>}
-                  subtitle={`${u.reports_submitted} reports · ${u.hazards_verified} verified`}
-                  right={<T v="body" style={{ fontVariant: ["tabular-nums"] }}>{u.points.toLocaleString()}</T>} />
-              ))}
-            </List>
-          </Card>
-        )}
-      </Section>
-
-      <Section title="Activity">
+      <Section title="Recent parking reports">
         {user?.history?.length ? (
           <Card padded={false}>
             <List>

@@ -1,15 +1,14 @@
 import { router, useFocusEffect } from "expo-router";
-import { Car, Navigation, Square, TriangleAlert, Volume2 } from "lucide-react-native";
+import { Car, Filter, Navigation, Square, TriangleAlert, Volume2 } from "lucide-react-native";
 import { useCallback, useMemo, useState } from "react";
 import { Linking, Pressable, StyleSheet, View } from "react-native";
 import { api, availabilityTone, directionsUrl, hhmm12, sentence, voicePaths, type Recommendation } from "../../src/api";
-import CampusMap from "../../src/components/CampusMap";
 import Header from "../../src/components/Header";
 import LotRow from "../../src/components/LotCard";
-import ModeToggle from "../../src/components/ModeToggle";
 import AskCard from "../../src/components/AskCard";
 import ParkingStatus from "../../src/components/ParkingStatus";
-import { Badge, Banner, Button, Card, DemoTag, Empty, List, Loading, Metrics, Section, Screen, T, row } from "../../src/components/ui";
+import SpotSniperCard from "../../src/components/SpotSniperCard";
+import { Badge, Banner, Button, Card, Chips, DemoTag, Empty, List, Loading, Metrics, Section, Screen, T, row } from "../../src/components/ui";
 import { useStore } from "../../src/store";
 import { space } from "../../src/theme";
 import { useVoice } from "../../src/voice";
@@ -18,18 +17,34 @@ import { metersBetween } from "../../src/parkDetect";
 
 const DEFAULT_DEST = "Davis Hall";
 
+const PERMIT_OPTIONS = [
+  { value: "all", label: "All Permits" },
+  { value: "commuter", label: "Commuter" },
+  { value: "park_and_ride", label: "Park & Ride" },
+  { value: "residence", label: "Residence" },
+  { value: "visitor", label: "Visitor" },
+];
+
 export default function Overview() {
   const { c, lots, state, hazards, weather, meta, refresh, toast } = useStore();
   const [rec, setRec] = useState<Recommendation | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [detailed, setDetailed] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [permitFilter, setPermitFilter] = useState("all");
   const pk = useParking();
+
   // Nearest first when we know where you are; otherwise most open spaces first.
   const sortedLots = useMemo(() => {
     const all = (lots?.lots ?? []).map((lot) => ({ lot, d: pk.position ? Math.round(metersBetween(pk.position, lot)) : null }));
     return all.sort((a, b) => (a.d != null && b.d != null ? a.d - b.d : b.lot.available - a.lot.available));
   }, [lots, pk.position]);
+
+  const filteredLots = useMemo(() => {
+    if (permitFilter === "all") return sortedLots;
+    return sortedLots.filter(({ lot }) => lot.kind === permitFilter);
+  }, [sortedLots, permitFilter]);
+
   const voice = useVoice();
 
   const loadRec = useCallback(async () => {
@@ -45,22 +60,24 @@ export default function Overview() {
     catch (e) { toast((e as Error).message, "error"); }
   };
 
+  const obs = weather?.observation;
+  const tempF = obs?.temperature_c != null ? `${Math.round((obs.temperature_c * 9) / 5 + 32)}°` : null;
+  const weatherSummary = [tempF, obs?.condition].filter(Boolean).join(" ");
+  const conditionTag = state?.mode === "ice" ? "❄️ Snow-adjusted" : null;
+  const headerSubtitle = `UB North Campus${weatherSummary ? ` · ${weatherSummary}` : ""}${conditionTag ? ` · ${conditionTag}` : ""}`;
+
   const t = lots?.totals;
   const best = rec?.best;
-  const alerts = weather?.alerts ?? [];
 
   return (
-    <Screen header={<Header brand title="WeParkit" subtitle={`UB North Campus${meta ? ` · ${hhmm12(meta.campus_time)}${meta.simulated_clock ? " (simulated clock)" : ""}` : ""}`} />}
+    <Screen header={<Header brand title="WeParkit" subtitle={headerSubtitle} />}
       onRefresh={onRefresh} refreshing={refreshing}>
 
       <ParkingStatus />
 
-      <AskCard destination={DEFAULT_DEST} />
+      <SpotSniperCard />
 
-      <Section title="UB parking map" footer="Numbers are estimated open spaces. Tap a lot for Google Maps directions.">
-        {lots ? <CampusMap lots={lots.lots} hazards={hazards} meta={meta} highlightSlug={best?.slug} height={340} />
-          : <Empty title="Map appears once lot data loads" />}
-      </Section>
+      <AskCard destination={DEFAULT_DEST} />
 
       <Section title={`Recommended for ${DEFAULT_DEST}`}>
         <Card onPress={() => router.push("/dock")} style={{ gap: space.md }}>
@@ -90,7 +107,7 @@ export default function Overview() {
                       onPress={() => (voice.playing === "briefing" ? voice.stop() : voice.play(voicePaths.briefing(DEFAULT_DEST), "briefing"))} />
                   )}
                 </View>
-                <Button size="sm" variant="secondary" title="Drive" icon={<Car size={15} color={c.text} />}
+                <Button size="sm" variant="secondary" title="Drive HUD" icon={<Car size={15} color={c.text} />}
                   onPress={() => router.push({ pathname: "/drive", params: { destination: DEFAULT_DEST } })} />
               </View>
             </>
@@ -98,52 +115,35 @@ export default function Overview() {
         </Card>
       </Section>
 
-      <Section title="Conditions">
-        <ModeToggle />
-        {alerts.slice(0, 2).map((a) => (
-          <Banner key={a.id} tone={a.winter ? "warn" : "neutral"} onPress={() => router.push("/orbit")}
-            icon={<TriangleAlert size={18} color={a.winter ? c.warn : c.textMuted} />}
-            title={<View style={row.gap}><T v="subheading" color={a.winter ? c.warn : c.text}>{a.event}</T>{a.demo && <DemoTag />}</View>}>
-            {a.headline}
-          </Banner>
-        ))}
+      <Section title="Permit filter">
+        <Chips options={PERMIT_OPTIONS} value={permitFilter} onChange={setPermitFilter} />
       </Section>
 
-      {t && (
-        <Metrics items={[
-          { label: "Spaces open", value: `~${t.available}` },
-          { label: "Occupancy", value: `${Math.round(t.occupancy_pct)}%` },
-          { label: "Snow-blocked", value: t.snow_blocked_spaces, color: t.snow_blocked_spaces ? c.warn : undefined },
-          { label: "Hazards", value: hazards.length, color: hazards.length ? c.warn : undefined },
-        ]} />
-      )}
-
-      <Section title={pk.position ? `Nearest UB lots (${lots?.lots.length ?? 0} total)` : `UB lots (${lots?.lots.length ?? 0})`}
+      <Section title={`UB parking lots (${filteredLots.length})`}
         action={{ label: detailed ? "Less detail" : "More detail", onPress: () => setDetailed((d) => !d) }}
         footer={`${lots?.disclaimer ?? ""} Lot outlines © OpenStreetMap contributors.`}>
         {lots ? (
           <Card padded={false}>
-            <List>{sortedLots.slice(0, showAll ? undefined : 8).map(({ lot: l, d }) => (
+            <List>{filteredLots.slice(0, showAll ? undefined : 8).map(({ lot: l, d }) => (
               <LotRow key={l.id} lot={l} detailed={detailed} highlight={l.slug === best?.slug} distanceM={d} />
             ))}</List>
-            {sortedLots.length > 8 && (
+            {filteredLots.length > 8 && (
               <Pressable onPress={() => setShowAll((v) => !v)} style={{ padding: space.lg, alignItems: "center", borderTopWidth: StyleSheet.hairlineWidth * 2, borderTopColor: c.divider }}>
-                <T v="label" color={c.accent}>{showAll ? "Show fewer" : `Show all ${sortedLots.length} lots`}</T>
+                <T v="label" color={c.accent}>{showAll ? "Show fewer" : `Show all ${filteredLots.length} lots`}</T>
               </Pressable>
             )}
           </Card>
         ) : <Loading label="Loading lots" />}
       </Section>
 
-
-      <Section title="Demo" footer="Uses a bundled sample photo, a simulated GOES-19 storm and a demo weather alert. Everything simulated is labelled.">
+      <Section title="Demo controls" footer="Replay lake-effect snowstorm or reset occupancy.">
         <Card style={{ gap: space.md }}>
           <View style={{ gap: 2 }}>
             <T v="subheading">Guided walkthrough</T>
-            <T v="caption">Scan a lot, replay a lake-effect storm, switch to ice season and see the recommendation update. About a minute.</T>
+            <T v="caption">Scan a lot, replay a lake-effect storm, and see the recommendation update. About a minute.</T>
           </View>
           <View style={row.gap}>
-            <Button title="Start" onPress={() => router.push("/demo")} style={{ flex: 1 }} />
+            <Button title="Start demo" onPress={() => router.push("/demo")} style={{ flex: 1 }} />
             <Button title="Reset data" variant="secondary" onPress={reset} style={{ flex: 1 }} />
           </View>
         </Card>

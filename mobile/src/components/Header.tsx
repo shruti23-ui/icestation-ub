@@ -23,7 +23,13 @@ export default function Header({ title, subtitle, onClose, brand }: { title: str
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
           {brand && <Pressable onPress={ping} hitSlop={8} accessibilityLabel="WeParkit logo"><Logo /></Pressable>}
-          <T v="title" numberOfLines={1}>{title}</T>
+          {title === "WeParkit" ? (
+            <Text style={{ fontSize: 24, fontWeight: "800", color: "#FFFFFF", letterSpacing: -0.5 }}>
+              WePark<Text style={{ color: c.accent }}>It</Text>
+            </Text>
+          ) : (
+            <T v="title" numberOfLines={1}>{title}</T>
+          )}
         </View>
         {subtitle ? <T v="caption" numberOfLines={1} style={{ marginTop: 2 }}>{subtitle}</T> : null}
       </View>
@@ -71,8 +77,8 @@ function Avatar() {
       accessibilityLabel={`Profile${user?.handle ? `, ${user.handle}` : ""}${parked ? ", parked" : ""}`} hitSlop={6}
       style={({ pressed }) => ({ transform: [{ scale: pressed ? 0.94 : 1 }] })}>
       <View style={{ width: SIZE, height: SIZE, borderRadius: SIZE / 2, alignItems: "center", justifyContent: "center",
-        backgroundColor: c.accentSoft, borderWidth: 2, borderColor: c.accent }}>
-        <Text style={{ color: c.accent, fontSize: initials.length > 1 ? 14 : 16, fontWeight: "800", letterSpacing: 0.5 }}>{initials}</Text>
+        backgroundColor: c.accent, borderWidth: 1.5, borderColor: c.accent }}>
+        <Text style={{ color: "#FFFFFF", fontSize: initials.length > 1 ? 14 : 16, fontWeight: "800", letterSpacing: 0.5 }}>{initials}</Text>
       </View>
       {parked && (
         <View style={{ position: "absolute", right: -1, bottom: -1, width: 13, height: 13, borderRadius: 7,

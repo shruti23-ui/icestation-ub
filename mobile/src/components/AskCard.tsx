@@ -40,7 +40,7 @@ export default function AskCard({ destination }: { destination: string }) {
           {phase === "listening" ? <Send size={24} color="#fff" />
             : phase === "speaking" ? <Volume2 size={26} color="#fff" />
               : phase === "thinking" ? <Ufo size={34} beam />
-                : <Mic size={28} color={c.onAccent} />}
+                : <Mic size={28} color="#FFFFFF" />}
         </Pressable>
         <View style={{ flex: 1, gap: 4 }}>
           <T v="subheading">{label}</T>

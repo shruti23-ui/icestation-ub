@@ -25,6 +25,7 @@ interface Auth {
   /** Sign in with a Google ID token (verified by the backend). */
   googleSignIn: (idToken: string) => Promise<void>;
   logout: () => Promise<void>;
+  continueAsGuest: () => void;
 }
 
 const Ctx = createContext<Auth | null>(null);
@@ -107,8 +108,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signOutLocal();
   }, [signOutLocal]);
 
-  const value = useMemo<Auth>(() => ({ status, account, login, signup, verify, resend, googleSignIn, logout }),
-    [status, account, login, signup, verify, resend, googleSignIn, logout]);
+  const continueAsGuest = useCallback(() => {
+    setAccount(null);
+    setStatus("signedIn");
+  }, []);
+
+  const value = useMemo<Auth>(() => ({ status, account, login, signup, verify, resend, googleSignIn, logout, continueAsGuest }),
+    [status, account, login, signup, verify, resend, googleSignIn, logout, continueAsGuest]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

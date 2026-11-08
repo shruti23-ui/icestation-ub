@@ -138,6 +138,10 @@ export default function AuthScreen() {
                 style={{ alignItems: "center" }} accessibilityRole="button">
                 <T v="label" color={c.accent}>{mode === "signup" ? "Already have an account? Log in" : "New here? Create an account"}</T>
               </Pressable>
+              <View style={{ height: 1, backgroundColor: c.divider, marginVertical: space.xs }} />
+              <Pressable onPress={auth.continueAsGuest} hitSlop={8} style={{ alignItems: "center" }} accessibilityRole="button">
+                <T v="label" color={c.textMuted}>Browse campus parking as guest →</T>
+              </Pressable>
             </Card>
           )}
 

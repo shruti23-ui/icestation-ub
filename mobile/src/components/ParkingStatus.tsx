@@ -1,6 +1,7 @@
-import { Car, Footprints, LogOut, MapPin } from "lucide-react-native";
+import { router } from "expo-router";
+import { Car, Compass, Footprints, LogOut, MapPin } from "lucide-react-native";
 import { useState } from "react";
-import { ActivityIndicator, Linking, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from "react-native";
 import { directionsUrl, fmtTime } from "../api";
 import { metersBetween } from "../parkDetect";
 import { useParking } from "../parking";
@@ -20,6 +21,8 @@ export default function ParkingStatus() {
     if (!r.ok) openPicker(r.reason);
   };
   const s = pk.session;
+  const saved = pk.savedCar;
+  const isParked = Boolean(s || saved);
   const here = lots?.lots.find((l) => l.id === pk.hereLotId);
   const near = lots?.lots.find((l) => l.id === pk.nearest?.lotId);
   // The lot "Yes, I'm parked" will use: the one you're inside, else the nearest UB lot within 400 m.
@@ -27,6 +30,12 @@ export default function ParkingStatus() {
   // Lot lists: nearest first when we know where you are.
   const byDistance = [...(lots?.lots ?? [])].sort((a, b) => pk.position
     ? metersBetween(pk.position, a) - metersBetween(pk.position, b) : a.name.localeCompare(b.name));
+
+  const carLat = s?.car_lat ?? saved?.lat ?? s?.lot?.lat;
+  const carLng = s?.car_lng ?? saved?.lng ?? s?.lot?.lng;
+  const carLotName = s?.lot?.name ?? saved?.lotName ?? "UB Campus";
+  const parkedTime = s?.started_at ? fmtTime(s.started_at) : saved?.timestamp ? fmtTime(new Date(saved.timestamp).toISOString()) : null;
+  const distToCar = pk.position && carLat && carLng ? Math.round(metersBetween(pk.position, { lat: carLat, lng: carLng })) : null;
 
   const where = pk.gps === "starting" ? { icon: <ActivityIndicator size="small" color={c.textMuted} />, text: "Finding your location…" }
     : pk.gps === "denied" ? { icon: <MapPin size={16} color={c.warn} />, text: "Location is off. Turn it on to detect your lot automatically." }
@@ -38,13 +47,24 @@ export default function ParkingStatus() {
                 : { icon: <ActivityIndicator size="small" color={c.textMuted} />, text: "Finding your location…" };
 
   const findCar = () => {
-    const lat = s?.car_lat ?? s?.lot?.lat, lng = s?.car_lng ?? s?.lot?.lng;
-    if (lat == null || lng == null) return;
-    Linking.openURL(directionsUrl(lat, lng, "walking")).catch(() => toast("Couldn't open Google Maps.", "error"));
+    if (carLat == null || carLng == null) return;
+    Linking.openURL(directionsUrl(carLat, carLng, "walking")).catch(() => toast("Couldn't open walking directions.", "error"));
+  };
+
+  const pinCurrentSpot = () => {
+    if (!pk.position) return toast("Waiting for GPS location...", "info");
+    pk.saveCar({
+      lotId: here?.id ?? near?.id ?? null,
+      lotName: here?.name ?? near?.name ?? "Pinned Location",
+      lat: pk.position.lat,
+      lng: pk.position.lng,
+      timestamp: Date.now(),
+    });
+    toast("Saved your parked spot pin!");
   };
 
   return (
-    <Card padded={false} style={{ borderColor: s ? c.success + "77" : c.accent + "55" }}>
+    <Card padded={false} style={{ borderColor: isParked ? c.success + "77" : c.accent + "55" }}>
       <View style={{ padding: space.lg, gap: space.md }}>
         <View style={row.between}>
           <View style={[row.gap, { flex: 1 }]}>
@@ -52,30 +72,54 @@ export default function ParkingStatus() {
             <T v="label" color={here ? c.success : c.textMuted} style={{ flex: 1 }} numberOfLines={2}>{where.text}</T>
           </View>
           <View style={row.gap}>
-            <StatusDot color={s ? c.success : c.textFaint} />
-            <T v="caption" color={s ? c.success : c.textMuted}>{s ? "Parked" : "Not parked"}</T>
+            <StatusDot color={isParked ? c.success : c.textFaint} />
+            <T v="caption" color={isParked ? c.success : c.textMuted}>{isParked ? "Parked" : "Not parked"}</T>
           </View>
         </View>
 
-        {s ? (
+        {isParked ? (
           <>
             <View style={{ gap: 2 }}>
               <View style={row.gap}>
-                <T v="heading" style={{ fontSize: 24 }}>Parked at {s.lot?.name}</T>
-                {s.source === "auto" && <Badge tone="accent">Auto</Badge>}
+                <T v="heading" style={{ fontSize: 24 }}>Parked at {carLotName}</T>
+                {s?.source === "auto" && <Badge tone="accent">Auto</Badge>}
+                {saved && !s && <Badge tone="success">Pinned GPS</Badge>}
               </View>
-              <T v="caption">Since {fmtTime(s.started_at)} · your space is counted for everyone</T>
+              <T v="caption">
+                {parkedTime ? `Since ${parkedTime}` : "Car pinned"}
+                {distToCar != null ? ` · ${distToCar} m away` : ""} · GPS pin saved
+              </T>
             </View>
-            <Button title="I left" icon={<LogOut size={18} color={c.onAccent} />} onPress={() => pk.checkOut("manual")} loading={pk.busy}
-              style={{ height: 54 }} />
             <View style={row.gap}>
-              <Button title="Find my car" variant="secondary" icon={<Footprints size={16} color={c.text} />} onPress={findCar} style={{ flex: 1 }} />
-              <Button title="Wrong lot?" variant="ghost" onPress={() => openPicker(null)} />
+              <Button
+                title="Blizzard Radar"
+                icon={<Compass size={18} color={c.onAccent} />}
+                onPress={() => router.push("/radar")}
+                style={{ flex: 1, height: 50 }}
+              />
+              <Button
+                title="Walk directions"
+                variant="secondary"
+                icon={<Footprints size={16} color={c.text} />}
+                onPress={findCar}
+                style={{ flex: 1, height: 50 }}
+              />
+            </View>
+            <View style={row.gap}>
+              <Button
+                title="I left (Free up spot)"
+                variant="secondary"
+                icon={<LogOut size={16} color={c.text} />}
+                onPress={() => pk.checkOut("manual")}
+                loading={pk.busy}
+                style={{ flex: 1 }}
+              />
+              <Button title="Change lot" variant="ghost" onPress={() => openPicker(null)} />
             </View>
             {picking && (
               <View style={{ gap: space.sm }}>
-                <T v="caption">Move your check-in to:</T>
-                <Chips options={byDistance.filter((l) => l.id !== s.lot?.id).map((l) => ({ value: String(l.id), label: l.name }))} value={null}
+                <T v="caption">Move your car pin to:</T>
+                <Chips options={byDistance.filter((l) => l.id !== s?.lot?.id).map((l) => ({ value: String(l.id), label: l.name }))} value={null}
                   onChange={(v) => { setPicking(false); pk.checkIn(Number(v), "manual"); }} />
               </View>
             )}
@@ -92,7 +136,21 @@ export default function ParkingStatus() {
           <>
             <T v="heading" style={{ fontSize: 24 }}>{target ? `Parked at ${target.name}?` : "Did you just park?"}</T>
             <Button title={pk.locating ? "Finding your lot…" : target ? `Yes, I'm parked at ${target.name}` : "Yes, I'm parked"}
-              icon={<Car size={18} color={c.onAccent} />} onPress={() => (target ? pk.checkIn(target.id, "manual") : parked())} loading={pk.busy || pk.locating} style={{ height: 54 }} />
+              icon={<Car size={18} color={c.onAccent} />} onPress={() => (target ? pk.checkIn(target.id, "manual") : parked())} loading={pk.busy || pk.locating} style={{ height: 52 }} />
+            <Button title="I'm leaving" variant="secondary" onPress={() => pk.checkOut("manual")} style={{ height: 48, marginTop: 4 }} />
+            <View style={row.between}>
+              <Pressable onPress={pinCurrentSpot} hitSlop={8} style={row.gap}>
+                <MapPin size={14} color={c.accent} />
+                <T v="caption" color={c.accent}>Pin exact GPS spot without lot</T>
+              </Pressable>
+              <Pressable onPress={() => router.push("/radar")} hitSlop={8} style={row.gap}>
+                <Compass size={14} color={c.accent} />
+                <T v="caption" color={c.accent}>Radar</T>
+              </Pressable>
+              <Pressable onPress={() => openPicker(null)} hitSlop={8}>
+                <T v="caption" color={c.textMuted}>Choose another lot</T>
+              </Pressable>
+            </View>
           </>
         )}
       </View>

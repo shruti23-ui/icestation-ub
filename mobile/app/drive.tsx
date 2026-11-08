@@ -2,34 +2,21 @@ import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, 
 import * as Haptics from "expo-haptics";
 import { useKeepAwake } from "expo-keep-awake";
 import { router, useLocalSearchParams } from "expo-router";
-import { Accelerometer } from "expo-sensors";
-import { ArrowDown, ArrowLeftRight, ArrowUp, Hand, Mic, Smartphone, X } from "lucide-react-native";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Linking, PanResponder, Platform, Pressable, StyleSheet, View } from "react-native";
+import { ChevronLeft, ChevronRight, Mic, Navigation, Square, Volume2, X } from "lucide-react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Linking, Pressable, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { api, askCopilot, availabilityTone, directionsUrl, hhmm12, lotFull, sentence, voicePaths, type Recommendation } from "../src/api";
-import { Ufo } from "../src/components/SpaceArt";
+import { api, askCopilot, availabilityTone, directionsUrl, hhmm12, sentence, voicePaths, type Recommendation } from "../src/api";
 import Starfield from "../src/components/Starfield";
 import { Badge, T, row } from "../src/components/ui";
 import { useStore } from "../src/store";
 import { radius, space } from "../src/theme";
 import { useVoice } from "../src/voice";
 
-const SWIPE = 60;         // px before a drag counts as a swipe
-const TAP_SLOP = 14;      // px of wobble still treated as a tap
-const LONG_PRESS = 650;   // ms
-const SHAKE_G = 2.2;      // acceleration magnitude (g) that counts as a shake
-const SHAKE_COOLDOWN = 2500;
-const LISTEN_MS = 5000;   // spoken questions are short; a fixed window is predictable while driving
-
-const buzz = (kind: "tap" | "ok" = "tap") =>
-  (kind === "ok" ? Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success) : Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)).catch(() => {});
-
 type Phase = "idle" | "listening" | "thinking";
 
-/** Eyes-free driving screen. The whole surface is one gesture pad and everything is spoken back.
- *  tap = briefing · swipe ←/→ = other lots · swipe ↑ = directions · swipe ↓ = ask a question
- *  long-press = stop · shake = repeat. Also speaks first when ice season starts or the lot fills up. */
+/** Simple, driver-safe HUD focusing on car parking.
+ *  Large high-contrast display, clear lot recommendation, one-tap navigation, and voice co-pilot. */
 export default function DriveMode() {
   useKeepAwake();
   const p = useLocalSearchParams<{ destination?: string; arrival?: string; accessible?: string }>();
@@ -40,252 +27,248 @@ export default function DriveMode() {
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [rec, setRec] = useState<Recommendation | null>(null);
   const [idx, setIdx] = useState(0);
-  const [hint, setHint] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
-  const [heard, setHeard] = useState<string | null>(null);
+  const [transcript, setTranscript] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    api.recommend({ destination, arrival: p.arrival ?? "", accessible }).then(setRec).catch((e) => toast((e as Error).message, "error"));
+    api.recommend({ destination, arrival: p.arrival ?? "", accessible })
+      .then(setRec)
+      .catch((e) => toast((e as Error).message, "error"));
   }, [destination, p.arrival, accessible, toast]);
+
   useEffect(() => { load(); }, [load]);
 
   const options = useMemo(() => (rec?.all ?? []).filter((e) => !e.accessible_blocked), [rec]);
   const cur = options[idx];
   const lot = lots?.lots.find((l) => l.slug === cur?.slug);
 
-  const flash = (text: string) => { setHint(text); setTimeout(() => setHint((h) => (h === text ? null : h)), 1400); };
-
-  const speak = (i: number) => {
-    const e = options[i];
-    if (!e || !rec) return;
-    if (i === 0) return voice.play(voicePaths.briefing(destination, p.arrival, accessible), "drive");
-    const l = lots?.lots.find((x) => x.slug === e.slug);
-    if (l) voice.play(voicePaths.lot(l.id), "drive");
-  };
-
-  // Speak the briefing as soon as the recommendation arrives.
+  // Speak initial briefing once loaded
   const spokeFirst = useRef(false);
-  useEffect(() => { if (rec && options.length && !spokeFirst.current) { spokeFirst.current = true; speak(0); } }); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (rec && options.length && !spokeFirst.current) {
+      spokeFirst.current = true;
+      voice.play(voicePaths.briefing(destination, p.arrival, accessible), "drive");
+    }
+  }, [rec, options.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => () => voice.stop(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---------------------------------------------------------------- voice questions (ElevenLabs STT)
-  const listen = useRef<{ active: boolean; timer: ReturnType<typeof setTimeout> | null }>({ active: false, timer: null });
+  // Voice recording toggle
+  const listenRef = useRef(false);
+  const toggleVoice = async () => {
+    if (phase === "listening") {
+      listenRef.current = false;
+      setPhase("thinking");
+      try { await recorder.stop(); } catch { /* ignore */ }
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+      const uri = recorder.uri;
+      if (!uri) { setPhase("idle"); return; }
+      try {
+        const res = await askCopilot({ audioUri: uri, destination, arrival: p.arrival, accessible });
+        setTranscript(res.transcript || "(didn't catch that)");
+        if (res.lot) {
+          const i = options.findIndex((o) => o.slug === res.lot!.slug);
+          if (i >= 0) setIdx(i);
+        }
+        voice.play(res.speech_path, "drive");
+        if (res.action === "directions" && res.lot) {
+          const { lat, lng } = res.lot;
+          setTimeout(() => Linking.openURL(directionsUrl(lat, lng)).catch(() => {}), 1500);
+        }
+      } catch (e) {
+        toast((e as Error).message, "error");
+      } finally {
+        setPhase("idle");
+      }
+      return;
+    }
 
-  const finishAsk = async () => {
-    const l = listen.current;
-    if (!l.active) return;
-    l.active = false;
-    if (l.timer) clearTimeout(l.timer);
-    setPhase("thinking");
-    try { await recorder.stop(); } catch { /* already stopped */ }
-    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
-    const uri = recorder.uri;
-    if (!uri) { setPhase("idle"); return; }
+    voice.stop();
+    const perm = await requestRecordingPermissionsAsync().catch(() => null);
+    if (!perm?.granted) return toast("Mic permission required for voice.", "error");
+
     try {
-      const res = await askCopilot({ audioUri: uri, destination, arrival: p.arrival, accessible });
-      setHeard(res.transcript || "(didn't catch that)");
-      if (res.lot) {
-        const i = options.findIndex((o) => o.slug === res.lot!.slug);
-        if (i >= 0) setIdx(i);
-      }
-      voice.play(res.speech_path, "drive");
-      if (res.action === "directions" && res.lot) {
-        const { lat, lng } = res.lot;
-        setTimeout(() => Linking.openURL(directionsUrl(lat, lng)).catch(() => {}), 1800);
-      }
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      listenRef.current = true;
+      setPhase("listening");
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     } catch (e) {
       toast((e as Error).message, "error");
-    } finally {
       setPhase("idle");
     }
   };
 
-  const startAsk = async () => {
-    if (listen.current.active) return finishAsk();
-    if (!voice.enabled) return toast("Voice questions need the ElevenLabs key on the server.", "info");
-    voice.stop();
-    try {
-      const perm = await requestRecordingPermissionsAsync();
-      if (!perm.granted) return toast("Microphone access is off. Enable it in Settings to ask questions.", "error");
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-      await recorder.prepareToRecordAsync();
-      recorder.record();
-    } catch (e) {
-      return toast(`Couldn't start the microphone: ${(e as Error).message}`, "error");
+  const nextLot = () => {
+    if (options.length > 1) {
+      const next = (idx + 1) % options.length;
+      setIdx(next);
+      Haptics.selectionAsync().catch(() => {});
+      const l = lots?.lots.find((x) => x.slug === options[next].slug);
+      if (l) voice.play(voicePaths.lot(l.id), "drive");
     }
-    listen.current = { active: true, timer: setTimeout(() => { finishAsk(); }, LISTEN_MS) };
-    setHeard(null);
-    setPhase("listening");
-    buzz();
   };
 
-  // ---------------------------------------------------------------- proactive alerts
-  const prevMode = useRef(state?.mode);
-  useEffect(() => {
-    const prev = prevMode.current;
-    prevMode.current = state?.mode;
-    if (!prev || !state || prev === state.mode) return;
-    if (state.mode === "ice") { flash("Ice season on"); voice.play(voicePaths.alert("ice_on", destination), "drive"); load(); }
-    else if (prev === "ice") { flash("Ice season off"); voice.play(voicePaths.alert("ice_off", destination), "drive"); load(); }
-  }, [state?.mode]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const wasFull = useRef<Record<number, boolean>>({});
-  useEffect(() => {
-    const target = lots?.lots.find((l) => l.slug === options[0]?.slug);
-    if (!target) return;
-    const full = lotFull(target) || target.occupancy_pct >= 95;
-    const before = wasFull.current[target.id];
-    wasFull.current[target.id] = full;
-    if (before === false && full) { flash(`${target.name} filling up`); voice.play(voicePaths.alert("lot_full", destination, target.id), "drive"); load(); }
-  }, [lots, options]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ---------------------------------------------------------------- gestures
-  // Rebuilt every render so the (once-created) PanResponder always calls current state.
-  const actions = useRef({ tap: () => {}, next: (_: 1 | -1) => {}, directions: () => {}, stop: () => {}, ask: () => {} });
-  actions.current = {
-    tap: () => {
-      if (listen.current.active) { finishAsk(); return; }   // tap while listening = done talking
-      buzz(); flash("Repeating"); speak(idx);
-    },
-    next: (dir) => {
-      const n = options.length;
-      if (!n) return;
-      const i = (idx + dir + n) % n;
-      buzz(); setIdx(i); flash(dir > 0 ? "Next lot" : "Previous lot"); speak(i);
-    },
-    directions: () => {
-      if (!lot) return;
-      buzz("ok"); flash("Opening Google Maps");
-      Linking.openURL(directionsUrl(lot.lat, lot.lng)).catch(() => toast("Couldn't open Google Maps.", "error"));
-    },
-    stop: () => { buzz(); flash("Stopped"); voice.stop(); },
-    ask: () => { startAsk(); },
+  const prevLot = () => {
+    if (options.length > 1) {
+      const prev = (idx - 1 + options.length) % options.length;
+      setIdx(prev);
+      Haptics.selectionAsync().catch(() => {});
+      const l = lots?.lots.find((x) => x.slug === options[prev].slug);
+      if (l) voice.play(voicePaths.lot(l.id), "drive");
+    }
   };
 
-  const pan = useMemo(() => {
-    let start = 0;
-    let longTimer: ReturnType<typeof setTimeout> | null = null;
-    let longFired = false;
-    const clear = () => { if (longTimer) clearTimeout(longTimer); longTimer = null; };
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
-        start = Date.now(); longFired = false;
-        longTimer = setTimeout(() => { longFired = true; actions.current.stop(); }, LONG_PRESS);
-      },
-      onPanResponderMove: (_, g) => { if (Math.abs(g.dx) > TAP_SLOP || Math.abs(g.dy) > TAP_SLOP) clear(); },
-      onPanResponderRelease: (_, g) => {
-        clear();
-        if (longFired) return;
-        const ax = Math.abs(g.dx), ay = Math.abs(g.dy);
-        if (g.dy < -SWIPE && ay > ax) return actions.current.directions();
-        if (g.dy > SWIPE && ay > ax) return actions.current.ask();
-        if (ax > SWIPE && ax > ay) return actions.current.next(g.dx < 0 ? 1 : -1);
-        if (ax < TAP_SLOP && ay < TAP_SLOP && Date.now() - start < LONG_PRESS) return actions.current.tap();
-      },
-      onPanResponderTerminate: clear,
-    });
-  }, []);
-
-  // Shake to repeat (native only; browsers rarely expose the accelerometer without a permission prompt).
-  useEffect(() => {
-    if (Platform.OS === "web") return;
-    let last = 0;
-    let sub: { remove: () => void } | null = null;
-    Accelerometer.isAvailableAsync().then((ok) => {
-      if (!ok) return;
-      Accelerometer.setUpdateInterval(120);
-      sub = Accelerometer.addListener(({ x, y, z }) => {
-        const now = Date.now();
-        if (Math.sqrt(x * x + y * y + z * z) > SHAKE_G && now - last > SHAKE_COOLDOWN) { last = now; actions.current.tap(); }
-      });
-    }).catch(() => {});
-    return () => sub?.remove();
-  }, []);
-
-  const speaking = voice.playing === "drive";
-  const status = phase === "listening" ? "Listening… ask your question"
-    : phase === "thinking" ? "Thinking…"
-      : speaking ? "Speaking…" : hint;
+  const openNavigation = () => {
+    if (!lot) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    Linking.openURL(directionsUrl(lot.lat, lot.lng)).catch(() => toast("Couldn't open Google Maps", "error"));
+  };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#02040A" }}>
       <Starfield />
-      <View style={[row.between, { paddingHorizontal: space.lg, paddingTop: space.sm }]}>
-        <Pressable onPress={() => router.back()} accessibilityLabel="Exit drive mode" hitSlop={12}
-          style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: c.surfaceAlt, alignItems: "center", justifyContent: "center" }}>
-          <X size={24} color={c.text} />
+
+      {/* Top Header */}
+      <View style={[row.between, { paddingHorizontal: space.lg, paddingTop: space.md, paddingBottom: space.sm }]}>
+        <View style={{ gap: 2 }}>
+          <T v="label" color={c.accent}>DRIVE HUD · {destination.toUpperCase()}</T>
+          <T v="caption" color={c.textMuted}>
+            {state?.mode === "ice" ? "❄️ Ice Season Active · Snow reduction applied" : "Standard Campus Conditions"}
+          </T>
+        </View>
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" }}
+        >
+          <X size={22} color={c.text} />
         </Pressable>
-        <View style={{ alignItems: "flex-end" }}>
-          <T v="label">Drive mode · {destination}</T>
-          <T v="caption">{voice.enabled ? "ElevenLabs voice co-pilot" : "Device voice"}</T>
-        </View>
       </View>
 
-      <View {...pan.panHandlers} style={{ flex: 1, justifyContent: "center", paddingHorizontal: space.xl, gap: space.lg }}
-        accessibilityRole="adjustable"
-        accessibilityLabel="Gesture pad. Tap to hear the briefing, swipe left or right for other lots, swipe up for directions, swipe down to ask a question, long press to stop."
-        accessibilityActions={[{ name: "activate" }, { name: "increment" }, { name: "decrement" }, { name: "magicTap" }]}
-        onAccessibilityAction={(e) => {
-          const a = e.nativeEvent.actionName;
-          if (a === "activate") actions.current.tap();
-          else if (a === "increment") actions.current.next(1);
-          else if (a === "decrement") actions.current.next(-1);
-          else if (a === "magicTap") actions.current.ask();
-        }}>
-        {!cur ? (
-          <View style={{ alignItems: "center", gap: space.md }}><Ufo size={90} /><T v="body" color={c.textMuted}>Finding the best lot…</T></View>
-        ) : (
-          <>
+      {/* Main Lot Card */}
+      <View style={{ flex: 1, justifyContent: "center", paddingHorizontal: space.lg, gap: space.xl }}>
+        {cur ? (
+          <View
+            style={{
+              backgroundColor: "rgba(10, 16, 32, 0.85)",
+              borderRadius: radius.lg,
+              borderWidth: 2,
+              borderColor: idx === 0 ? c.accent : c.border,
+              padding: space.xl,
+              gap: space.lg,
+            }}
+          >
             <View style={row.between}>
-              <T v="label">{idx === 0 ? "Best option" : `Option ${idx + 1} of ${options.length}`}</T>
-              <Badge tone={availabilityTone(cur.label)}>{sentence(cur.label)}</Badge>
+              <Badge tone={idx === 0 ? "accent" : "neutral"}>
+                {idx === 0 ? "PRIMARY RECOMMENDATION" : `BACKUP OPTION #${idx}`}
+              </Badge>
+              <Badge tone={availabilityTone(cur.label)}>
+                {sentence(cur.label)}
+              </Badge>
             </View>
-            <T v="title" style={{ fontSize: 46, lineHeight: 52 }} numberOfLines={2}>{cur.name}</T>
-            <T v="heading" color={c.textMuted} style={{ fontSize: 24 }}>~{cur.expected_open_spaces} spaces open</T>
-            <View style={{ gap: 2 }}>
-              <T v="label">Leave by</T>
-              <T v="title" color={c.accent} style={{ fontSize: 56, lineHeight: 62, fontVariant: ["tabular-nums"] }}>{hhmm12(cur.recommended_departure)}</T>
+
+            <View style={{ gap: 6 }}>
+              <T v="title" style={{ fontSize: 32, fontWeight: "700" }}>{cur.name}</T>
+              <T v="heading" color={c.accent} style={{ fontSize: 24, fontVariant: ["tabular-nums"] }}>
+                ~{cur.expected_open_spaces} spaces open
+              </T>
             </View>
-          </>
+
+            <View style={[row.between, { paddingTop: space.sm, borderTopWidth: StyleSheet.hairlineWidth * 2, borderTopColor: c.divider }]}>
+              <View style={{ gap: 2 }}>
+                <T v="caption" color={c.textMuted}>Walk to {destination}</T>
+                <T v="subheading">{Math.round(cur.walk_minutes)} min {cur.via_shuttle ? "(shuttle)" : ""}</T>
+              </View>
+              <View style={{ gap: 2, alignItems: "flex-end" }}>
+                <T v="caption" color={c.textMuted}>Leave By</T>
+                <T v="subheading" color={c.accent}>{hhmm12(cur.recommended_departure)}</T>
+              </View>
+            </View>
+
+            {/* Switch Lots Controls */}
+            {options.length > 1 && (
+              <View style={[row.between, { paddingTop: space.xs }]}>
+                <Pressable onPress={prevLot} style={[row.gap, { padding: space.xs }]}>
+                  <ChevronLeft size={18} color={c.textMuted} />
+                  <T v="caption" color={c.textMuted}>Previous lot</T>
+                </Pressable>
+                <T v="caption" color={c.textMuted}>{idx + 1} of {options.length}</T>
+                <Pressable onPress={nextLot} style={[row.gap, { padding: space.xs }]}>
+                  <T v="caption" color={c.textMuted}>Next lot</T>
+                  <ChevronRight size={18} color={c.textMuted} />
+                </Pressable>
+              </View>
+            )}
+          </View>
+        ) : null}
+
+        {transcript && (
+          <View style={{ backgroundColor: "rgba(255,255,255,0.06)", borderRadius: radius.md, padding: space.md }}>
+            <T v="caption" color={c.textMuted}>Heard: "{transcript}"</T>
+          </View>
         )}
-        <View style={{ minHeight: 64, gap: 4 }}>
-          {status && (
-            <View style={row.gap}>
-              {phase === "listening" ? <Mic size={22} color={c.danger} /> : (speaking || phase === "thinking") ? <Ufo size={30} beam={phase === "thinking"} /> : null}
-              <T v="body" color={phase === "listening" ? c.danger : c.accent}>{status}</T>
-            </View>
-          )}
-          {heard && phase !== "listening" && <T v="caption" numberOfLines={2}>You asked: “{heard}”</T>}
-        </View>
       </View>
 
-      <View style={{ paddingHorizontal: space.lg, paddingBottom: space.lg, gap: space.sm }}>
-        <View style={{ flexDirection: "row", gap: space.sm }}>
-          <Gesture icon={<Hand size={18} color={c.text} />} label="Tap: hear it" />
-          <Gesture icon={<ArrowLeftRight size={18} color={c.text} />} label="Swipe: other lots" />
-        </View>
-        <View style={{ flexDirection: "row", gap: space.sm }}>
-          <Gesture icon={<ArrowDown size={18} color={c.text} />} label="Swipe down: ask" />
-          <Gesture icon={<ArrowUp size={18} color={c.text} />} label="Swipe up: directions" />
-        </View>
-        <View style={[row.gap, { justifyContent: "center" }]}>
-          <Smartphone size={13} color={c.textFaint} />
-          <T v="caption" color={c.textFaint}>Long-press to stop · shake to repeat · mount your phone before driving</T>
+      {/* Giant Driver Buttons */}
+      <View style={{ paddingHorizontal: space.lg, paddingBottom: space.xl, gap: space.md }}>
+        <Pressable
+          onPress={openNavigation}
+          style={({ pressed }) => ({
+            backgroundColor: c.accent,
+            borderRadius: radius.lg,
+            height: 64,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: space.md,
+            opacity: pressed ? 0.85 : 1,
+          })}
+        >
+          <Navigation size={26} color={c.onAccent} />
+          <T v="heading" color={c.onAccent} style={{ fontSize: 20, fontWeight: "700" }}>
+            Start Navigation
+          </T>
+        </Pressable>
+
+        <View style={row.gap}>
+          <Pressable
+            onPress={toggleVoice}
+            style={({ pressed }) => ({
+              flex: 1,
+              backgroundColor: phase === "listening" ? c.danger : "rgba(255,255,255,0.1)",
+              borderRadius: radius.lg,
+              height: 54,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: space.sm,
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <Mic size={22} color={phase === "listening" ? "#fff" : c.text} />
+            <T v="subheading" color={phase === "listening" ? "#fff" : c.text}>
+              {phase === "listening" ? "Listening… tap to send" : phase === "thinking" ? "Thinking…" : "Ask Voice"}
+            </T>
+          </Pressable>
+
+          <Pressable
+            onPress={() => voice.playing ? voice.stop() : voice.play(voicePaths.briefing(destination, p.arrival, accessible), "drive")}
+            style={({ pressed }) => ({
+              width: 54,
+              height: 54,
+              borderRadius: radius.lg,
+              backgroundColor: "rgba(255,255,255,0.1)",
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            {voice.playing ? <Square size={20} color={c.accent} /> : <Volume2 size={22} color={c.text} />}
+          </Pressable>
         </View>
       </View>
     </SafeAreaView>
-  );
-}
-
-function Gesture({ icon, label }: { icon: ReactNode; label: string }) {
-  const { c } = useStore();
-  return (
-    <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: space.sm, paddingVertical: space.md,
-      borderRadius: radius.md, backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth * 2, borderColor: c.border }}>
-      {icon}
-      <T v="caption">{label}</T>
-    </View>
   );
 }

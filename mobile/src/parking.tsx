@@ -7,11 +7,21 @@ import { decide, lotAt, metersBetween, type Fix } from "./parkDetect";
 import { useStore } from "./store";
 
 const AUTO_KEY = "icestation_auto_detect";
+const SAVED_CAR_KEY = "weparkit_saved_car_pin";
 const CAMPUS_RADIUS_M = 2500;   // farther than this from every UB lot = not on North Campus
 // "Yes, I'm parked" is the student telling us they're parked, so accept the nearest UB lot this close
 // even if GPS puts them just outside its outline (big lots, GPS drift, parked at the edge).
 const PARKED_NEAREST_MAX_M = 400;
 const FRESH_FIX_MS = 60_000;
+
+export interface SavedCarPin {
+  lotId?: number | null;
+  lotName?: string | null;
+  lat: number;
+  lng: number;
+  timestamp: number;
+  note?: string;
+}
 
 export type ParkHereResult = { ok: true } | { ok: false; reason: string };
 
@@ -19,6 +29,9 @@ type Gps = "starting" | "watching" | "off" | "denied" | "unavailable";
 
 interface Parking {
   session: ParkingSession | null;
+  savedCar: SavedCarPin | null;
+  saveCar: (pin: SavedCarPin) => Promise<void>;
+  clearSavedCar: () => Promise<void>;
   /** UB lot the latest GPS fix is inside (outline match with a little GPS slack). */
   hereLotId: number | null;
   /** Closest UB lot to the latest fix, and how far away it is. */
@@ -47,6 +60,7 @@ export const ParkingContext = Ctx;
 export function ParkingProvider({ children }: { children: ReactNode }) {
   const { user, lots, refresh, toast } = useStore();
   const [session, setSession] = useState<ParkingSession | null>(null);
+  const [savedCar, setSavedCar] = useState<SavedCarPin | null>(null);
   const [autoDetect, setAuto] = useState(false);
   const [gps, setGps] = useState<Gps>("starting");
   const [hereLotId, setHere] = useState<number | null>(null);
@@ -58,6 +72,22 @@ export function ParkingProvider({ children }: { children: ReactNode }) {
   const lastFix = useRef<Fix | null>(null);
   const live = useRef({ session, lots, user });
   live.current = { session, lots, user };
+
+  useEffect(() => {
+    AsyncStorage.getItem(SAVED_CAR_KEY)
+      .then((raw) => { if (raw) setSavedCar(JSON.parse(raw)); })
+      .catch(() => {});
+  }, []);
+
+  const saveCar = useCallback(async (pin: SavedCarPin) => {
+    setSavedCar(pin);
+    await AsyncStorage.setItem(SAVED_CAR_KEY, JSON.stringify(pin)).catch(() => {});
+  }, []);
+
+  const clearSavedCar = useCallback(async () => {
+    setSavedCar(null);
+    await AsyncStorage.removeItem(SAVED_CAR_KEY).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -77,10 +107,22 @@ export function ParkingProvider({ children }: { children: ReactNode }) {
 
   const checkIn = useCallback(async (lotId: number, source: "manual" | "auto" = "manual", at?: { lat: number; lng: number }) => {
     const u = live.current.user;
-    if (!u) return;
+    const f = at ?? lastFix.current;
+    const matchedLot = live.current.lots?.lots.find((l) => l.id === lotId);
+    const pinLat = f?.lat ?? matchedLot?.lat ?? 43.0006;
+    const pinLng = f?.lng ?? matchedLot?.lng ?? -78.789;
+    const lotName = matchedLot?.name ?? "Campus Lot";
+
+    // Save car pin locally so the user can always find it
+    await saveCar({ lotId, lotName, lat: pinLat, lng: pinLng, timestamp: Date.now() });
+
+    if (!u) {
+      toast(`Car location saved at ${lotName}`);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      return;
+    }
     setBusy(true);
     try {
-      const f = at ?? lastFix.current;
       const r = await api.checkIn({ user_id: u.id, lot_id: lotId, source, ...(f ? { lat: f.lat, lng: f.lng } : {}) });
       setSession(r.session);
       fixes.current = [];
@@ -89,11 +131,15 @@ export function ParkingProvider({ children }: { children: ReactNode }) {
       refresh("lots");
     } catch (e) { toast((e as Error).message, "error"); }
     finally { setBusy(false); }
-  }, [refresh, toast]);
+  }, [refresh, toast, saveCar]);
 
   const checkOut = useCallback(async (source: "manual" | "auto" = "manual") => {
+    await clearSavedCar();
     const u = live.current.user;
-    if (!u) return;
+    if (!u) {
+      toast("Car location cleared.");
+      return;
+    }
     setBusy(true);
     try {
       const r = await api.checkOut({ user_id: u.id, source });
@@ -104,7 +150,7 @@ export function ParkingProvider({ children }: { children: ReactNode }) {
       refresh("lots", "notifications", "crew");
     } catch (e) { toast((e as Error).message, "error"); }
     finally { setBusy(false); }
-  }, [refresh, toast]);
+  }, [refresh, toast, clearSavedCar]);
 
   const parkHere = useCallback(async (): Promise<ParkHereResult> => {
     // 1. Already standing inside a lot outline: check in straight away.
@@ -198,8 +244,10 @@ export function ParkingProvider({ children }: { children: ReactNode }) {
   }, [lots?.lots.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onCampus = nearest ? nearest.distanceM <= CAMPUS_RADIUS_M : null;
-  const value = useMemo<Parking>(() => ({ session, hereLotId, nearest, onCampus, position, autoDetect, gps, busy, locating, setAutoDetect, checkIn, checkOut, parkHere }),
-    [session, hereLotId, nearest, onCampus, position, autoDetect, gps, busy, locating, setAutoDetect, checkIn, checkOut, parkHere]);
+  const value = useMemo<Parking>(() => ({
+    session, savedCar, saveCar, clearSavedCar, hereLotId, nearest, onCampus,
+    position, autoDetect, gps, busy, locating, setAutoDetect, checkIn, checkOut, parkHere
+  }), [session, savedCar, saveCar, clearSavedCar, hereLotId, nearest, onCampus, position, autoDetect, gps, busy, locating, setAutoDetect, checkIn, checkOut, parkHere]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

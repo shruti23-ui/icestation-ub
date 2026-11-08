@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Footprints, Orbit, Route, ScanLine, Satellite } from "lucide-react-native";
+import { Car, Footprints, Route, ScanLine } from "lucide-react-native";
 import type { ComponentType } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,11 +9,10 @@ type Icon = ComponentType<{ size?: number; color?: string; strokeWidth?: number 
 
 // Order matches the file routes below. `crew` is reachable from the header profile button, not the bar.
 const TABS: Record<string, { label: string; icon: Icon }> = {
-  index: { label: "Overview", icon: Orbit },
+  index: { label: "Parking", icon: Car },
   dock: { label: "Plan", icon: Route },
   scan: { label: "Scan", icon: ScanLine },
   ice: { label: "Walkways", icon: Footprints },
-  orbit: { label: "Satellite", icon: Satellite },
 };
 
 export default function TabLayout() {
@@ -23,14 +22,14 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: c.bg } }}
       tabBar={({ state, navigateToTab }) => (
-        <View style={{ flexDirection: "row", backgroundColor: "rgba(4,6,14,0.94)", borderTopColor: c.border, borderTopWidth: StyleSheet.hairlineWidth * 2,
+        <View style={{ flexDirection: "row", backgroundColor: "rgba(6,10,22,0.96)", borderTopColor: c.border, borderTopWidth: StyleSheet.hairlineWidth * 2,
           paddingTop: 8, paddingBottom: Math.max(insets.bottom, 8) }}>
           {state.routes.map((route, i) => {
             const cfg = TABS[route.name];
             if (!cfg) return null;
             const focused = state.index === i;
             const Icon = cfg.icon;
-            const color = focused ? c.accent : c.textMuted;
+            const color = focused ? c.warn : c.textMuted;
             return (
               <Pressable key={route.key} onPress={() => { if (!focused) navigateToTab(route.key); }}
                 accessibilityRole="tab" accessibilityState={{ selected: focused }} accessibilityLabel={cfg.label}
