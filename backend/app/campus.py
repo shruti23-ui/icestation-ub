@@ -17,7 +17,13 @@ _S = get_settings()
 
 def _scaled_capacities(lots: list[dict]) -> dict[str, int]:
     """Map each lot's estimated size onto [min, max] by rank (percentile), rounded to `step`, so capacities
-    are spread out (some 20, some 30, ... some 50) and a bigger lot never gets fewer spaces than a smaller one."""
+    are spread out (some 20, some 30, ... some 50) and a bigger lot never gets fewer spaces than a smaller one.
+    With `lot_capacity_tiers` set (e.g. "56,116,300"), lots are split by size rank into that many equal groups
+    (small / mid / big) and each group gets its tier's capacity."""
+    tiers = sorted(int(t) for t in _S.lot_capacity_tiers.split(",") if t.strip())
+    if tiers:
+        ranked = sorted(lots, key=lambda l: (l["total_capacity"], l["slug"]))
+        return {l["slug"]: tiers[min(len(tiers) - 1, i * len(tiers) // len(ranked))] for i, l in enumerate(ranked)}
     lo, hi, step = _S.lot_capacity_min, _S.lot_capacity_max, max(1, _S.lot_capacity_step)
     if hi <= 0:
         return {l["slug"]: l["total_capacity"] for l in lots}
@@ -66,7 +72,7 @@ for _l in sorted(_DATA["lots"], key=lambda l: (_ORDER.index(l["slug"]) if l["slu
     _capped = _capacity != _l["total_capacity"]
     _profile, _ = _TUNED.get(_l["slug"], (_PROFILE[_l["kind"]], 0))
     _rows = max(1, round(_capacity / 10))
-    _cap_note = (f"{_capacity} spaces (project setting, scaled by lot size)" if _capped
+    _cap_note = (f"{_capacity} spaces (project setting by lot size)" if _capped
                  else "capacity from OSM" if _l["capacity_source"] == "osm_tag" else "capacity estimated from lot area")
     _desc = " · ".join(x for x in (_KIND_TEXT[_l["kind"]], _l.get("permit") or "Permit rules not listed: check UB Parking", _cap_note) if x)
     LOTS.append({
@@ -105,9 +111,7 @@ HAZARD_LOCATIONS = [
 ]
 
 DEMO_USERS = [
-    ("Nova", 1240, 31, 18),
-    ("Kestrel", 980, 24, 15),
-    ("Polaris", 760, 19, 9),
-    ("Lumen", 540, 12, 11),
-    ("Vega", 310, 8, 4),
+    ("Shruti", 1240, 31, 18),
+    ("Shashank", 980, 24, 15),
+    ("Roy", 760, 19, 9),
 ]

@@ -63,7 +63,8 @@ npx expo install --fix                      # if Expo warns about versions
   Never present seed occupancy as live UB data. Never say a spot is reserved. Never call a route "safe".
   **Exception (owner's decision, 2026-11-08): Drive mode** speaks/shows short driver lines with no data-source
   footnotes (`drive_briefing_text`, `drive_lot_text`, `?drive=true`, `drive` on /ask) to avoid distraction.
-  Everywhere else keeps the labels.
+  Also (2026-11-08): the Overview "Campus at a glance" footer no longer carries the "estimates / demo data"
+  sentence; per-lot DEMO tags and data_source stay. Everywhere else keeps the labels.
 - **Vehicle count ≠ open spaces.** Open spaces come from `services/vision/spaces.py`
   (calibrated stall regions → area heuristic → Gemini). Keep it that way.
 - **Privacy first:** `vision/privacy.py` runs before any image is written. Raw uploads never touch disk.

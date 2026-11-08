@@ -7,9 +7,9 @@ import { Image, Pressable, ScrollView, View } from "react-native";
 import { api, media, type Hazard, type PickedImage, type Sample, type ScanResult } from "../../src/api";
 import GpsRow from "../../src/components/GpsRow";
 import Header from "../../src/components/Header";
-import LiveScan, { ISSUE_COLOR } from "../../src/components/LiveScan";
+import LiveScan from "../../src/components/LiveScan";
 import {
-  Badge, Banner, Button, Card, Chips, DemoTag, ErrorNote, Field, IconButton, List, ListRow, ProgressBar, Section, Screen, Segmented, StatusDot, T, row,
+  Badge, Banner, Button, Card, Chips, DemoTag, ErrorNote, Field, IconButton, List, ListRow, ProgressBar, Section, Screen, Segmented, T, row,
 } from "../../src/components/ui";
 import { useLotLocator } from "../../src/location";
 import { useParking } from "../../src/parking";
@@ -199,26 +199,9 @@ export default function Scan() {
             <ProgressBar pct={result.frame_occupancy_fraction * 100} height={6} />
             <View style={row.between}>
               <Field label="Vehicles" value={String(result.vehicles_detected)} />
-              <Field label="Snow-blocked" value={String(result.snow_blocked_spaces)} color={result.snow_blocked_spaces ? c.warn : undefined} />
-              <Field label="Unplowed rows" value={String(result.unplowed_rows ?? 0)} />
               <Field label="Confidence" value={`${Math.round(result.confidence * 100)}%`} />
             </View>
           </Card>
-
-          {result.verdict && (
-            <Section title="Why spaces are unusable" footer={result.issues_method}>
-              <Card padded={false}>
-                <List>
-                  <ListRow left={<StatusDot color={result.verdict.blocked ? c.danger : result.verdict.usable ? c.success : c.warn} />}
-                    title={<T v="subheading">{result.verdict.headline}</T>} />
-                  {(result.issues ?? []).map((i, n) => (
-                    <ListRow key={n} left={<View style={{ width: 12, height: 12, borderRadius: 3, borderWidth: 2, borderColor: ISSUE_COLOR[i.kind] ?? c.danger }} />}
-                      title={i.label} subtitle={i.detail || undefined} right={<T v="caption">{Math.round(i.score * 100)}%</T>} />
-                  ))}
-                </List>
-              </Card>
-            </Section>
-          )}
 
           <Section title="Summary" footer={result.explanation_source}>
             <Card><T v="body">{result.explanation}</T></Card>
@@ -241,7 +224,6 @@ export default function Scan() {
                 <List>
                   <Stepper label="Occupied" value={edit.occupied} onChange={(v) => setEdit({ ...edit, occupied: v })} />
                   <Stepper label="Open" value={edit.open} onChange={(v) => setEdit({ ...edit, open: v })} />
-                  <Stepper label="Snow-blocked" value={edit.blocked} onChange={(v) => setEdit({ ...edit, blocked: v })} />
                 </List>
               </Card>
               <View style={row.gap}>
