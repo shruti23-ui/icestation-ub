@@ -13,12 +13,14 @@ def test_all_ub_lots_from_osm():
     assert len({l["slug"] for l in LOTS}) == len(LOTS)
 
 
-def test_capacities_scaled_15_to_30_by_lot_size():
+def test_capacities_tiered_small_mid_big_by_lot_size():
     import json
+    from collections import Counter
     from pathlib import Path
     caps = {l["slug"]: l["total_capacity"] for l in LOTS}
-    assert all(15 <= v <= 30 and v % 5 == 0 for v in caps.values())           # project setting: 15..30, steps of 5
-    assert {15, 20, 25, 30} <= set(caps.values())                             # varied, capped at 30
+    counts = Counter(caps.values())
+    assert set(counts) == {56, 116, 300}                                      # project setting: small / mid / big
+    assert max(counts.values()) - min(counts.values()) <= 1                   # equal thirds by size rank
     raw = {l["slug"]: l["total_capacity"] for l in json.loads(Path("app/ub_lots.json").read_text())["lots"]}
     for a in raw:                                                             # a bigger lot never gets fewer spaces
         for b in raw:

@@ -30,10 +30,24 @@ def seed(db: Session) -> None:
         for key, value in cfg.items():
             if getattr(lot, key) != value:
                 setattr(lot, key, value)
-    if not db.query(User).filter(User.is_seed.is_(True)).count():
-        for handle, pts, reports, verified in DEMO_USERS:
+    # The seeded leaderboard crew is configuration too: rename/reuse existing seed users in order, add missing
+    # ones, drop extras. A handle a real student already owns is skipped.
+    seeds = db.query(User).filter(User.is_seed.is_(True)).order_by(User.id).all()
+    taken = {h for (h,) in db.query(User.handle).filter(User.is_seed.is_(False))}
+    wanted = [u for u in DEMO_USERS if u[0] not in taken]
+    for i, (handle, pts, reports, verified) in enumerate(wanted):
+        if i < len(seeds):
+            seeds[i].handle = f"__seed_{seeds[i].id}"  # free the unique handle before the final rename
+    db.flush()
+    for i, (handle, pts, reports, verified) in enumerate(wanted):
+        if i < len(seeds):
+            u = seeds[i]
+            u.handle, u.points, u.reports_submitted, u.hazards_verified = handle, pts, reports, verified
+        else:
             db.add(User(handle=handle, is_anonymous=False, is_seed=True, points=pts,
                         reports_submitted=reports, hazards_verified=verified))
+    for u in seeds[len(wanted):]:
+        db.delete(u)
     if db.get(SystemState, 1) is None:
         db.add(SystemState(id=1))
     db.commit()

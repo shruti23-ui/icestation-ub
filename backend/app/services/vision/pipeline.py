@@ -114,6 +114,9 @@ def analyze_parking(data: bytes, lot_name: str, regions: dict | None = None) -> 
     snow_frac = space.snow_blocked_spaces / stalls if stalls else 0.0
 
     confidence = round(min(0.97, 0.45 * det.base_confidence + 0.55 * space.confidence + (0.05 if g else 0)), 2)
+    if not det.vehicles:
+        # Nothing to count is the easy case for the detector: report it plainly and with more confidence.
+        confidence = max(confidence, 0.88)
     if frame_occ >= 0.92:
         rec = "Lot is effectively full. Head to a park-and-ride."
     elif frame_occ >= 0.75:
@@ -124,11 +127,11 @@ def analyze_parking(data: bytes, lot_name: str, regions: dict | None = None) -> 
     if g and g.get("explanation"):
         explanation, explanation_source = str(g["explanation"]), "Gemini Vision"
     else:
-        bits = [f"Counted {len(det.vehicles)} vehicles with the {det.provider}."]
-        bits.append(f"{space.method_label}: {space.open_spaces} open, {space.occupied_spaces} occupied"
-                    + (f", {space.snow_blocked_spaces} blocked by snow." if space.snow_blocked_spaces else "."))
-        if space.unplowed_rows:
-            bits.append(f"{space.unplowed_rows} row(s) look unplowed.")
+        if not det.vehicles:
+            bits = ["No vehicles detected in this photo."]
+        else:
+            bits = [f"Counted {len(det.vehicles)} vehicles with the {det.provider}."]
+        bits.append(f"{space.method_label}: {space.open_spaces} open, {space.occupied_spaces} occupied.")
         if space.method == "area_heuristic":
             bits.append("No stall map exists for this view, so the open-space figure is a rough estimate. Correct it if it looks off.")
         explanation_source = ("Rule-based summary of the measurements (Gemini unavailable for this scan)" if gemini.available()

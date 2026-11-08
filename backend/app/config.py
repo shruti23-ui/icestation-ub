@@ -90,9 +90,11 @@ class Settings(BaseSettings):
     smtp_from: str = "WeParkit <no-reply@weparkit.local>"
 
     # --- Lots ---------------------------------------------------------------
-    # Project setting: lot capacities are scaled into this range by relative lot size (the biggest lots get
-    # the max, the smallest the min), rounded to `step`. The OSM area estimate is kept in app/ub_lots.json.
-    # Set lot_capacity_max=0 to use the raw estimates instead.
+    # Project setting: lots are ranked by outline area and split into equal size tiers, smallest to biggest;
+    # each tier gets one capacity (default: small 56, mid 116, big 300). Empty = use the MIN..MAX range below.
+    # The OSM area estimate is kept in app/ub_lots.json.
+    lot_capacity_tiers: str = "56,116,300"
+    # Fallback when tiers are empty: scale into MIN..MAX by size, rounded to `step` (MAX=0 = raw estimates).
     lot_capacity_min: int = 15
     lot_capacity_max: int = 30
     lot_capacity_step: int = 5

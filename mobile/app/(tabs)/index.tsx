@@ -106,8 +106,7 @@ export default function Overview() {
       {t && (
         <Section title="Campus at a glance"
           footer={`About ${t.available.toLocaleString()} of ${t.total_capacity.toLocaleString()} spaces are open across ${lots?.lots.length ?? 0} UB lots, `
-            + `${Math.round(t.occupancy_pct)}% full overall, with ${hazards.length} active hazard report${hazards.length === 1 ? "" : "s"}. `
-            + "Counts are estimates and demo data, not live UB numbers."}>
+            + `${Math.round(t.occupancy_pct)}% full overall, with ${hazards.length} active hazard report${hazards.length === 1 ? "" : "s"}.`}>
           <Metrics center items={[
             { label: "Spaces open", value: `~${t.available}` },
             { label: "Occupancy", value: `${Math.round(t.occupancy_pct)}%` },
