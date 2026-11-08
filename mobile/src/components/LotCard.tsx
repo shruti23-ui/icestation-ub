@@ -23,8 +23,11 @@ export default function LotRow({ lot, detailed = false, highlight = false, dista
           <T v="caption" numberOfLines={1}>{KIND_LABEL[lot.kind] ?? "Lot"}{distanceM != null ? ` · ${distanceM < 1000 ? `${distanceM} m` : `${(distanceM / 1000).toFixed(1)} km`}` : ""} · {sourceLabel(lot.data_source)}</T>
         </View>
         <View style={{ alignItems: "flex-end" }}>
-          <T v="subheading" color={full ? c.warn : c.text} style={{ fontVariant: ["tabular-nums"] }}>{full ? "Full" : `${lot.available} open`}</T>
-          <T v="caption" style={{ fontVariant: ["tabular-nums"] }}>{Math.round(lot.occupancy_pct)}% full</T>
+          <T v="subheading" color={full ? c.warn : c.text} style={{ fontVariant: ["tabular-nums"] }}>{full ? `Full · ${lot.snow_adjusted_capacity}/${lot.snow_adjusted_capacity}` : `${lot.available} open`}</T>
+          {/* Total slots in the lot ("~" = estimated from the lot's area); snow-blocked stalls are excluded in ice season */}
+          <T v="caption" style={{ fontVariant: ["tabular-nums"] }}>
+            of {lot.capacity_is_seed_estimate ? "~" : ""}{lot.snow_adjusted_capacity} spaces · {Math.round(lot.occupancy_pct)}% full
+          </T>
         </View>
       </View>
       <ProgressBar pct={lot.occupancy_pct} />
@@ -37,7 +40,7 @@ export default function LotRow({ lot, detailed = false, highlight = false, dista
               color={lot.snow_blocked_spaces ? c.warn : undefined} />
           </View>
           <View style={row.wrap}>
-            {lot.data_source === "demo" && <DemoTag label="Demo scan" />}
+            {lot.data_source === "demo" && <DemoTag label="Demo data" />}
             {lot.pending_departures > 0 && <Badge tone="success">{lot.pending_departures} leaving soon</Badge>}
             {lot.snow_source === "ice-season default" && <Badge tone="warn">Ice season −18%</Badge>}
             {lot.capacity_is_seed_estimate && <Badge>Capacity est.</Badge>}

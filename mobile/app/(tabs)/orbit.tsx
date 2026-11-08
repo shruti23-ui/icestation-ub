@@ -1,8 +1,8 @@
 import { useFocusEffect } from "expo-router";
-import { CloudSnow, Play, RefreshCw, TriangleAlert } from "lucide-react-native";
+import { CloudSnow, Droplets, Eye, RefreshCw, Thermometer, TriangleAlert, Wind } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Image, View } from "react-native";
-import { api, fmtTime, media, minutes, type Analysis, type SatStatus } from "../../src/api";
+import { ago, api, fmtTime, media, minutes, type Analysis, type SatStatus } from "../../src/api";
 import Header from "../../src/components/Header";
 import { modeLabel } from "../../src/components/ModeToggle";
 import { Badge, Banner, Button, Card, DemoTag, Empty, Field, List, ListRow, Loading, Section, Screen, StatusDot, T, row } from "../../src/components/ui";
@@ -12,7 +12,7 @@ import { radius, space } from "../../src/theme";
 const compass = (deg?: number | null) =>
   deg == null ? "—" : ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(deg / 45) % 8];
 
-export default function Satellite() {
+export default function Weather() {
   const { c, weather, state, refresh, toast } = useStore();
   const [status, setStatus] = useState<SatStatus | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -24,6 +24,24 @@ export default function Satellite() {
     try { setStatus(await api.satStatus()); } catch (e) { toast((e as Error).message, "error"); }
   }, [toast]);
   useFocusEffect(useCallback(() => { load(); }, [load, state?.mode]));
+  // Real-time: whenever GOES-19 has a newer frame than our last analysis, analyze it (on open and every 5 min).
+  const autoBusy = useRef(false);
+  const syncLive = useCallback(async () => {
+    if (autoBusy.current) return;
+    autoBusy.current = true;
+    try {
+      const st = await api.satStatus();
+      setStatus(st);
+      const latest = st.live_feed.latest_acquired_at, la = st.latest_analysis;
+      const stale = st.live_feed.online && latest && (!la || la.source !== "goes19_live" || la.acquired_at < latest);
+      if (stale) { setAnalysis(await api.analyze()); setStatus(await api.satStatus()); refresh("state", "lots", "weather"); }
+    } catch { /* keep showing what we have */ } finally { autoBusy.current = false; }
+  }, [refresh]);
+  useFocusEffect(useCallback(() => {
+    syncLive();
+    const id = setInterval(syncLive, 5 * 60_000);
+    return () => clearInterval(id);
+  }, [syncLive]));
   useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
 
   // Step through the replay frames, then settle on the tracking overlay.
@@ -65,7 +83,10 @@ export default function Satellite() {
   const live = status?.live_feed.online;
 
   return (
-    <Screen header={<Header title="Satellite" subtitle="NOAA GOES-19 lake-effect snow tracking" />} onRefresh={load}>
+    <Screen header={<Header title="Weather" subtitle="Live driving conditions for UB North Campus" />} onRefresh={load}>
+      <DriverWeather />
+
+      <Section title="Satellite snow tracking">
       <Card padded={false}>
         <View style={{ padding: space.lg, gap: 4 }}>
           <View style={row.between}>
@@ -73,7 +94,7 @@ export default function Satellite() {
               <StatusDot color={live ? c.success : c.warn} />
               <T v="subheading">{live ? "Live feed online" : "Live feed offline"}</T>
             </View>
-            {status?.live_feed.latest_acquired_at && <T v="caption">Latest {fmtTime(status.live_feed.latest_acquired_at)}</T>}
+            {status?.live_feed.latest_acquired_at && <T v="caption">Latest frame {fmtTime(status.live_feed.latest_acquired_at)} · auto-updates</T>}
           </View>
           {status?.live_feed.error && <T v="caption" color={c.warn}>{status.live_feed.error}. Using a labelled simulated feed.</T>}
         </View>
@@ -93,9 +114,10 @@ export default function Satellite() {
         </View>
       </Card>
 
+      </Section>
+
       <View style={row.gap}>
-        <Button title="Analyze now" variant="secondary" icon={<RefreshCw size={15} color={c.text} />} onPress={() => run("analyze")} loading={busy === "analyze"} style={{ flex: 1 }} />
-        <Button title="Replay demo storm" variant="secondary" icon={<Play size={15} color={c.text} />} onPress={() => run("storm")} loading={busy === "storm"} style={{ flex: 1 }} />
+        <Button title="Analyze latest frame now" variant="secondary" icon={<RefreshCw size={15} color={c.text} />} onPress={() => run("analyze")} loading={busy === "analyze"} style={{ flex: 1 }} />
       </View>
       {analysis?.live_source_status && <T v="caption">Live feed: {analysis.live_source_status}</T>}
 
@@ -140,47 +162,68 @@ export default function Satellite() {
         </Card>
       </Section>
 
-      <Section title="Weather" footer={weather?.source_label}>
-        <Card padded={false}>
-          <List>
-            {weather?.observation ? (
-              <ListRow title={weather.observation.temperature_c != null ? `${Math.round(weather.observation.temperature_c)}°C · ${weather.observation.condition}` : weather.observation.condition}
-                subtitle={`Wind ${weather.observation.wind_kph ?? "—"} km/h · ${weather.observation.station}`}
-                right={weather.observation_is_demo ? <DemoTag /> : undefined} />
-            ) : <ListRow title="No current observation" />}
-            {weather?.alerts.length ? weather.alerts.map((a) => (
-              <ListRow key={a.id} left={<TriangleAlert size={16} color={a.winter ? c.warn : c.textMuted} />}
-                title={a.event} subtitle={a.headline} right={a.demo ? <DemoTag /> : undefined} />
-            )) : <ListRow title="No active alerts for North Campus" />}
-          </List>
-        </Card>
-        {weather?.errors.length ? <Banner tone="danger">{weather.errors.join(" · ")}</Banner> : null}
-      </Section>
-
-      <Section title="Recent observations">
-        {!status ? <Loading /> : status.timeline.length === 0 ? <Empty title="No observations yet">Run an analysis to record one.</Empty> : (
-          <Card padded={false}>
-            <List>
-              {status.timeline.map((o) => (
-                <ListRow key={o.id} left={<StatusDot color={o.band_detected ? c.warn : c.textFaint} />}
-                  title={<T v="body" style={{ fontVariant: ["tabular-nums"] }}>{fmtTime(o.acquired_at)}</T>}
-                  right={<View style={row.gap}>
-                    {o.is_demo && <DemoTag label={o.source === "simulated" ? "Simulated" : "Demo"} />}
-                    <T v="caption">{o.band_detected ? `Band${o.eta_minutes != null ? ` · ETA ${minutes(o.eta_minutes)}` : ""}` : "Clear"}</T>
-                  </View>} />
-              ))}
-            </List>
-          </Card>
-        )}
-      </Section>
-
-      <Section title="About GOES-19">
-        <Card style={{ flexDirection: "row", borderRadius: radius.lg }}>
-          <Field label="Altitude" value="35,786 km" />
-          <Field label="Position" value="75.2° W" />
-          <Field label="Cadence" value="~5 min" />
-        </Card>
-      </Section>
     </Screen>
+  );
+}
+
+/** What a driver needs from the weather: temperature, feels-like, conditions, wind, visibility, alerts, advice.
+ *  Live from the National Weather Service (Buffalo airport station KBUF, ~5 km from North Campus). */
+function DriverWeather() {
+  const { c, weather } = useStore();
+  const o = weather?.observation;
+  const alerts = weather?.alerts ?? [];
+  const footer = `${weather?.source_label ?? "National Weather Service"}${o ? ` · ${o.station}, updated ${ago(o.observed_at)}` : ""}`;
+  return (
+    <Section title="Driving conditions now" footer={footer}>
+      <Card style={{ gap: space.lg }}>
+        {o ? (
+          <>
+            <View style={[row.between, { alignItems: "flex-end" }]}>
+              <View style={{ gap: 2 }}>
+                <View style={row.gap}>
+                  <T v="title" style={{ fontSize: 44, lineHeight: 50 }}>{o.temperature_f != null ? `${o.temperature_f}°F` : "—"}</T>
+                  {weather?.observation_is_demo && <DemoTag />}
+                </View>
+                <T v="caption">{o.temperature_c != null ? `${o.temperature_c}°C` : ""}{o.feels_like_f != null && o.feels_like_f !== o.temperature_f ? ` · feels like ${o.feels_like_f}°F` : ""}</T>
+              </View>
+              <T v="heading" style={{ textAlign: "right", flexShrink: 1 }}>{o.condition}</T>
+            </View>
+            <View style={row.between}>
+              <Stat icon={<Wind size={16} color={c.textMuted} />} label="Wind"
+                value={o.wind_mph != null ? `${o.wind_mph} mph ${o.wind_dir ?? ""}`.trim() : "—"}
+                sub={o.gust_mph != null ? `gusts ${o.gust_mph} mph` : undefined} />
+              <Stat icon={<Eye size={16} color={c.textMuted} />} label="Visibility" value={o.visibility_mi != null ? `${o.visibility_mi} mi` : "—"} />
+              <Stat icon={<Droplets size={16} color={c.textMuted} />} label="Humidity" value={o.humidity_pct != null ? `${o.humidity_pct}%` : "—"} />
+            </View>
+            <View style={{ gap: space.sm }}>
+              {o.advice.map((a) => (
+                <View key={a} style={row.gap}>
+                  <Thermometer size={14} color={o.advice.length === 1 && a.startsWith("No weather") ? c.success : c.warn} />
+                  <T v="body" style={{ flex: 1, fontSize: 14 }}>{a}</T>
+                </View>
+              ))}
+            </View>
+          </>
+        ) : <T v="body" color={c.textMuted}>Live weather isn't available right now.</T>}
+      </Card>
+      {alerts.map((a) => (
+        <Banner key={a.id} tone={a.winter ? "warn" : "neutral"} icon={<TriangleAlert size={18} color={a.winter ? c.warn : c.textMuted} />}
+          title={<View style={row.gap}><T v="subheading" color={a.winter ? c.warn : c.text}>{a.event}</T>{a.demo && <DemoTag />}</View>}>
+          {a.headline}
+        </Banner>
+      ))}
+      {!alerts.length && o && <T v="caption">No active weather alerts for North Campus.</T>}
+      {weather?.errors.length ? <Banner tone="danger">{weather.errors.join(" · ")}</Banner> : null}
+    </Section>
+  );
+}
+
+function Stat({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {
+  return (
+    <View style={{ flex: 1, gap: 2 }}>
+      <View style={row.gap}>{icon}<T v="caption">{label}</T></View>
+      <T v="subheading">{value}</T>
+      {sub ? <T v="caption">{sub}</T> : null}
+    </View>
   );
 }

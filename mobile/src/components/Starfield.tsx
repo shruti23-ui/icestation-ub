@@ -61,21 +61,21 @@ function Starfield() {
       <Svg width={width} height={height} style={StyleSheet.absoluteFill}>
         <Defs>
           <RadialGradient id={ids.a} cx="80%" cy="0%" r="70%">
-            <Stop offset="0" stopColor={c.accent} stopOpacity={0.16} />
+            <Stop offset="0" stopColor={c.accent} stopOpacity={0.2} />
             <Stop offset="1" stopColor={c.accent} stopOpacity={0} />
           </RadialGradient>
           <RadialGradient id={ids.b} cx="0%" cy="35%" r="60%">
-            <Stop offset="0" stopColor={c.violet} stopOpacity={0.11} />
+            <Stop offset="0" stopColor={c.violet} stopOpacity={0.14} />
             <Stop offset="1" stopColor={c.violet} stopOpacity={0} />
           </RadialGradient>
         </Defs>
         <Circle cx={width * 0.8} cy={0} r={Math.max(width, height) * 0.7} fill={`url(#${ids.a})`} />
         <Circle cx={0} cy={height * 0.35} r={Math.max(width, height) * 0.6} fill={`url(#${ids.b})`} />
-        {stars.map((s, i) => <Circle key={i} cx={s.x} cy={s.y} r={s.s / 2} fill="#FFFFFF" opacity={s.o} />)}
+        {stars.map((s, i) => <Circle key={i} cx={s.x} cy={s.y} r={s.s / 2} fill="#FFFFFF" opacity={s.o * 0.9} />)}
       </Svg>
 
       <View style={{ position: "absolute", right: -48, top: height * 0.42 }}>
-        <Planet size={150} opacity={0.55} />
+        <Planet size={150} opacity={0.45} />
       </View>
 
       <Animated.View style={{ position: "absolute", top: height * 0.2, left: 0, opacity: 0.75,

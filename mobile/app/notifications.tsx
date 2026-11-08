@@ -1,4 +1,3 @@
-import { router } from "expo-router";
 import { useEffect } from "react";
 import { View } from "react-native";
 import { ago } from "../src/api";
@@ -15,11 +14,11 @@ export default function Notifications() {
   const { c, notifications, markRead } = useStore();
   useEffect(() => { markRead(); }, [markRead]);
   return (
-    <Screen header={<Header title="Notifications" onClose={() => router.back()} />}>
+    <Screen header={<Header title="Notifications" subtitle="Latest 3" home />}>
       {notifications.length === 0 ? <Empty art={<Alien size={56} />} title="All quiet out here">Lot updates, hazards, departures and help requests appear here.</Empty> : (
         <Card padded={false}>
           <List>
-            {notifications.map((n) => {
+            {notifications.slice(0, 3).map((n) => {
               const warn = n.kind === "ice_season" || n.kind === "hazard";
               return (
                 <ListRow key={n.id} left={<StatusDot color={warn ? c.warn : c.accent} />}

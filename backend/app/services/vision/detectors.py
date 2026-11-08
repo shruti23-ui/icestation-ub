@@ -110,7 +110,31 @@ class OpenCVBlobDetector:
                           note="Classical colour-segmentation detector (no ML weights). Install YOLOv8 for robust detection.")
 
 
+class CocoDarknetDetector:
+    """YOLOv4-tiny (COCO) through OpenCV DNN: real vehicle + person boxes without PyTorch."""
+    name = "yolov4-tiny"
+
+    def available(self) -> bool:
+        from . import coco
+        return coco.available()
+
+    def detect(self, image: np.ndarray) -> Detections:
+        from . import coco
+        h, w = image.shape[:2]
+        vehicles, people = [], []
+        for o in coco.detect(image, conf=0.25):
+            x1, y1, x2, y2 = (int(o["box"][0] * w), int(o["box"][1] * h), int(o["box"][2] * w), int(o["box"][3] * h))
+            if o["kind"] == "vehicle" and o["label"] not in ("bicycle",):
+                vehicles.append(Box(x1, y1, x2, y2, o["label"], o["score"]))
+            elif o["kind"] == "person":
+                people.append(Box(x1, y1, x2, y2, "person", o["score"]))
+        mean = float(np.mean([v.score for v in vehicles])) if vehicles else 0.6
+        return Detections(vehicles, people, provider=coco.NAME, base_confidence=min(0.9, 0.5 + 0.4 * mean),
+                          note="COCO-pretrained YOLOv4-tiny; classical car finders fill in what it misses")
+
+
 _yolo = YoloV8Detector()
+_darknet = CocoDarknetDetector()
 _opencv = OpenCVBlobDetector()
 
 
@@ -118,4 +142,6 @@ def get_detector() -> object:
     choice = settings.vision_provider.lower()
     if choice in ("auto", "yolo") and _yolo.available():
         return _yolo
+    if choice in ("auto", "yolo") and _darknet.available():
+        return _darknet
     return _opencv

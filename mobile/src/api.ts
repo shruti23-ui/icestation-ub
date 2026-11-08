@@ -1,8 +1,23 @@
+import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
+import { deleteAsync, EncodingType, FileSystemUploadType, readAsStringAsync, uploadAsync } from "expo-file-system/legacy";
+import { Platform } from "react-native";
 // Typed API client for the WeParkit FastAPI backend.
+import { campusTimeLabel } from "./campusTime";
 import { API_BASE as BASE } from "./config";
 
 /** A photo picked with expo-image-picker. React Native FormData accepts {uri,name,type}. */
 export interface PickedImage { uri: string; name?: string; mimeType?: string }
+export type IssueKind = "vehicle" | "ice" | "water" | "cone" | "object";
+export interface Issue { kind: IssueKind; label: string; box: [number, number, number, number]; score: number; detail: string }
+export interface Verdict { usable: boolean; blocked: boolean; headline: string; reasons: string[] }
+export interface LiveObject {
+  label: string; kind: "vehicle" | "space" | "person" | "issue" | "other"; issue?: IssueKind;
+  box: [number, number, number, number]; score: number | null;
+}
+export interface LiveDetect {
+  objects: LiveObject[]; cars: number; spaces: number; is_parking_scene: boolean; scene: string;
+  message: string | null; provider: string; latency_ms: number; verdict?: Verdict;
+}
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public data?: Record<string, unknown>) { super(message); }
@@ -45,7 +60,11 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     try { res = await attempt(path, init, timeout); }
     catch { throw new ApiError(0, UNREACHABLE); }
   }
-  const text = await res.text();
+  return parse<T>(path, res.status, res.ok, await res.text());
+}
+
+function parse<T>(path: string, status: number, ok: boolean, text: string): T {
+  const res = { status, ok };
   let data: any = {}; // eslint-disable-line @typescript-eslint/no-explicit-any
   try { data = text ? JSON.parse(text) : {}; }
   catch { if (res.ok) throw new ApiError(res.status, `Backend returned non-JSON from ${path}`); data = { detail: text.slice(0, 200) }; }
@@ -60,6 +79,67 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(res.status, msg, d && typeof d === "object" && !Array.isArray(d) ? d : undefined);
   }
   return data as T;
+}
+
+/** Photo uploads. On phones, React Native's fetch + FormData multipart is unreliable on Android ("Network request
+ *  failed" before anything is sent), so native uploads go through Expo's native uploader, after shrinking the
+ *  photo to 1600 px (a full-res photo is 3-6 MB; 1600 px is plenty for detection). Web uses fetch with a Blob. */
+async function upload<T>(path: string, fields: Record<string, string | number | boolean | null | undefined>, image: PickedImage,
+  opts: { shrink?: boolean; timeoutMs?: number; mimeType?: string } = {}): Promise<T> {
+  let cleanupUri: string | null = null;   // shrunk temp copy of this upload, deleted once sent
+  const params: Record<string, string> = {};
+  for (const [k, v] of Object.entries(fields)) if (v !== null && v !== undefined && v !== "") params[k] = String(v);
+  const timeoutMs = opts.timeoutMs ?? UPLOAD_TIMEOUT_MS;
+  const timeout = <R,>(p: Promise<R>) => Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timed out")), timeoutMs))]);
+  try {
+    if (Platform.OS === "web") {
+      const fd = new FormData();
+      for (const [k, v] of Object.entries(params)) fd.append(k, v);
+      fd.append("file", await (await fetch(image.uri)).blob(), image.name ?? "photo.jpg");
+      const res = await timeout(fetch(BASE + path, { method: "POST", body: fd, headers: authToken ? { Authorization: `Bearer ${authToken}` } : {} }));
+      return parse<T>(path, res.status, res.ok, await res.text());
+    }
+    let uri = image.uri;
+    if (opts.shrink !== false) {
+      try { uri = (await manipulateAsync(uri, [{ resize: { width: 1600 } }], { compress: 0.8, format: SaveFormat.JPEG })).uri; cleanupUri = uri; }
+      catch { /* send the original */ }
+    }
+    let first: unknown;
+    try {
+      const r = await Promise.race([uploadAsync(BASE + path, uri, {
+        httpMethod: "POST", uploadType: FileSystemUploadType.MULTIPART, fieldName: "file", mimeType: opts.mimeType ?? "image/jpeg",
+        parameters: params, headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+      }), new Promise<never>((_, rej) => setTimeout(() => rej(new Error("upload timed out")), Math.min(timeoutMs, 25000)))]);
+      return parse<T>(path, r.status, r.status >= 200 && r.status < 300, r.body);
+    } catch (e) {
+      if (e instanceof ApiError) throw e;   // the server answered (e.g. bad photo): no point retrying
+      first = e;
+    }
+    // Fallback: some networks drop big phone->laptop uploads but pass small requests. Send ~48 KB pieces.
+    clientLog(`native upload to ${path} failed: ${(first as Error)?.message ?? first}; trying chunked upload`);
+    const b64 = await readAsStringAsync(uri, { encoding: EncodingType.Base64 });
+    const size = 48 * 1024;   // multiple of 4 so every piece is valid base64 on its own
+    let uploadId: string | null = null;
+    for (let i = 0, n = 0; i < b64.length; i += size, n++) {
+      const piece: { upload_id: string } = await req<{ upload_id: string }>("/api/parking/upload-chunk", json({ upload_id: uploadId, index: n, data: b64.slice(i, i + size) }));
+      uploadId = piece.upload_id;
+    }
+    const body = new URLSearchParams({ ...params, upload_id: uploadId ?? "" }).toString();
+    return await timeout(req<T>(path, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body }));
+  } catch (e) {
+    clientLog(`upload to ${path} failed: ${(e as Error)?.message ?? e}`);
+    if (e instanceof ApiError) throw e;
+    throw new ApiError(0, `Couldn't upload the photo (${(e as Error).message || "network error"}). ` +
+      `Make sure the phone is on the same Wi-Fi as the laptop running the backend (${BASE}), then try again.`);
+  } finally {
+    if (cleanupUri && Platform.OS !== "web") deleteAsync(cleanupUri, { idempotent: true }).catch(() => {});
+  }
+}
+
+/** Best-effort: report a client-side failure to the server log (small JSON, fire and forget). */
+function clientLog(message: string) {
+  fetch(BASE + "/api/parking/client-log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }) })
+    .catch(() => {});
 }
 
 const json = (body: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -82,6 +162,8 @@ export type Mode = "standard" | "watch" | "ice";
 export interface Lot {
   id: number; slug: string; name: string; kind: string; description: string;
   lat: number; lng: number; polygon: [number, number][];
+  /** Where a mapped road enters the lot (OSM). Driving directions go here. */
+  entrance?: [number, number];
   total_capacity: number; capacity_is_seed_estimate: boolean;
   snow_adjusted_capacity: number; snow_blocked_spaces: number; snow_blocked_fraction: number; snow_source: string;
   occupied: number; available: number; occupancy_pct: number; confidence: number;
@@ -105,6 +187,8 @@ export interface ScanResult {
   detector: string; detector_note: string; gemini_used: boolean; annotated_image_url: string; blurred_image_url: string;
   privacy: { regions_blurred: number; methods: string[] }; sample_is_synthetic: boolean;
   frame_occupancy_fraction: number; frame_snow_blocked_fraction: number; snow_cover_fraction: number;
+  /** Local OpenCV issue detector: what makes spaces unusable (snow, ice, water, cones, objects). */
+  issues?: Issue[]; verdict?: Verdict; issues_method?: string;
 }
 
 export interface Hazard {
@@ -136,7 +220,7 @@ export interface CrewUser {
 }
 export interface Weather {
   source: string; source_label: string; errors: string[];
-  observation: { temperature_c: number | null; wind_kph: number | null; condition: string; observed_at: string; station: string } | null;
+  observation: WeatherObservation | null;
   observation_is_demo: boolean;
   alerts: { id: string; event: string; headline: string; severity: string; onset: string; ends: string; winter: boolean; demo: boolean; source: string }[];
   winter_alert_active: boolean; demo_active: boolean;
@@ -161,6 +245,13 @@ export interface Analysis {
 export interface Meta {
   buildings: { name: string; lat: number; lng: number }[]; hazard_locations: { name: string; lat: number; lng: number }[];
   campus_center: [number, number]; campus_time: string; simulated_clock: boolean; config: Record<string, number>;
+}
+/** Live NWS reading (Buffalo airport, KBUF) shaped for drivers; `advice` is plain-English driving guidance. */
+export interface WeatherObservation {
+  temperature_c: number | null; temperature_f: number | null; feels_like_c: number | null; feels_like_f: number | null;
+  condition: string; precipitation: string | null; wind_kph: number | null; wind_mph: number | null;
+  gust_kph: number | null; gust_mph: number | null; wind_dir: string | null; visibility_km: number | null;
+  visibility_mi: number | null; humidity_pct: number | null; advice: string[]; observed_at: string; station: string;
 }
 export interface LocateResult {
   lot: { id: number; slug: string; name: string } | null;
@@ -202,8 +293,21 @@ export const api = {
   samples: () => req<{ samples: Sample[] }>("/api/parking/samples"),
   locate: (lat: number, lng: number, accuracy_m?: number | null) =>
     req<LocateResult>(`/api/parking/locate?lat=${lat}&lng=${lng}${accuracy_m ? `&accuracy_m=${Math.round(accuracy_m)}` : ""}`),
+  /** Live camera frame -> labelled boxes. On web the frame is a data/blob URL, so it's sent as a real Blob. */
+  /** save=true only for the Capture button: the server keeps a privacy-blurred, annotated copy. Preview frames: false. */
+  liveDetect: async (image: PickedImage, save = false) => {
+    if (Platform.OS === "web") {
+      const fd = new FormData();
+      if (save) fd.append("save", "true");
+      fd.append("file", await (await fetch(image.uri)).blob(), "frame.jpg");
+      return req<LiveDetect & { saved?: boolean }>("/api/parking/live-detect", { method: "POST", body: fd });
+    }
+    return upload<LiveDetect & { saved?: boolean }>("/api/parking/live-detect", save ? { save: "true" } : {}, image,
+      { shrink: save, timeoutMs: save ? 60000 : 20000 });
+  },
   scan: (lot_id: number, opts: { file?: PickedImage | null; sample_id?: string | null }) =>
-    req<ScanResult>("/api/parking/scan", form({ lot_id, file: opts.file, sample_id: opts.sample_id })),
+    opts.file ? upload<ScanResult>("/api/parking/scan", { lot_id }, opts.file)
+      : req<ScanResult>("/api/parking/scan", form({ lot_id, sample_id: opts.sample_id })),
   report: (body: Record<string, unknown>) => req<{ report_id: number; lot: Lot; points_awarded: number; corrected: boolean; expires_in_minutes: number }>("/api/parking/report", json(body)),
   recommend: (p: { destination: string; arrival: string; accessible: boolean; drive_minutes?: number; user_id?: number }) =>
     req<Recommendation>(`/api/parking/recommendations?${new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]))}`),
@@ -222,8 +326,11 @@ export const api = {
   reset: () => req<{ ok: boolean }>("/api/demo/reset", { method: "POST" }),
   hazards: () => req<{ hazards: Hazard[] }>("/api/hazards"),
   routes: (destination: string) => req<{ destination: string; routes: (Route & { lot: string; slug: string })[] }>(`/api/hazards/routes?destination=${encodeURIComponent(destination)}`),
-  reportHazard: (f: { location_name: string; category: string; user_id?: number; file?: PickedImage | null; sample_id?: string; is_demo?: boolean }) =>
-    req<{ created: boolean; hazard?: Hazard; ai: Record<string, unknown> | null; points_awarded?: number; message?: string }>("/api/hazards/report", form(f)),
+  /** A dropped pin (lat/lng) is the location; location_name is optional (the server names the spot). */
+  reportHazard: (f: { location_name?: string; lat?: number; lng?: number; description?: string; category: string; user_id?: number; file?: PickedImage | null; sample_id?: string; is_demo?: boolean }) =>
+    f.file ? upload<{ created: boolean; hazard?: Hazard; ai: Record<string, unknown> | null; points_awarded?: number; message?: string }>(
+      "/api/hazards/report", { location_name: f.location_name, lat: f.lat, lng: f.lng, description: f.description, category: f.category, user_id: f.user_id, sample_id: f.sample_id, is_demo: f.is_demo }, f.file)
+      : req<{ created: boolean; hazard?: Hazard; ai: Record<string, unknown> | null; points_awarded?: number; message?: string }>("/api/hazards/report", form(f)),
   vote: (id: number, user_id: number, vote: "confirm" | "clear") => req<{ hazard: Hazard; cleared: boolean; points_awarded: number }>(`/api/hazards/${id}/vote`, json({ user_id, vote })),
   clearHazard: (id: number, user_id: number) => req<{ hazard: Hazard; cleared: boolean; points_awarded: number }>(`/api/hazards/${id}/clear`, json({ user_id })),
   me: (user_id?: number | null, body?: Partial<Pick<CrewUser, "needs_accessible_routes" | "accepts_assist_requests">>) =>
@@ -234,12 +341,8 @@ export const api = {
   notifications: () => req<{ notifications: Notification[] }>("/api/notifications"),
 };
 
-export const fmtTime = (iso?: string | null) => {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  const h = d.getHours(), m = d.getMinutes();
-  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
-};
+/** API timestamps (UTC) shown as New York campus time, whatever the phone's timezone: "1:05 PM". */
+export const fmtTime = (iso?: string | null) => campusTimeLabel(iso);
 export const hhmm12 = (t?: string | null) => {
   if (!t) return "—";
   const [h, m] = t.split(":").map(Number);
@@ -251,7 +354,7 @@ export const ago = (iso?: string | null) => {
   return m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
 };
 export const sourceLabel = (s: string) =>
-  ({ seed_model: "Model estimate", crew_scan: "Student scan", crew_manual: "Student report", demo: "Demo scan" } as Record<string, string>)[s] ?? s;
+  ({ seed_model: "Model estimate", crew_scan: "Student scan", crew_manual: "Student report", demo: "Demo data" } as Record<string, string>)[s] ?? s;
 
 /** Shared "full" rule so lists, maps and sheets never disagree. */
 export const lotFull = (l: Pick<Lot, "available" | "snow_adjusted_capacity">) => l.available <= Math.max(2, l.snow_adjusted_capacity * 0.02);
@@ -267,22 +370,34 @@ export const minutes = (m: number) => (m >= 60 ? `${Math.floor(m / 60)}h ${Strin
 
 /** Backend paths that stream ElevenLabs MP3 audio (see backend/app/routers/voice.py). */
 export const voicePaths = {
-  briefing: (destination: string, arrival?: string, accessible = false) =>
-    `/api/voice/briefing?${new URLSearchParams({ destination, accessible: String(accessible), ...(arrival ? { arrival } : {}) })}`,
-  lot: (id: number) => `/api/voice/lot/${id}`,
+  briefing: (destination: string, arrival?: string, accessible = false, intro = false, drive = false) =>
+    `/api/voice/briefing?${new URLSearchParams({ destination, accessible: String(accessible), ...(arrival ? { arrival } : {}), ...(intro ? { intro: "true" } : {}), ...(drive ? { drive: "true" } : {}) })}`,
+  lot: (id: number, drive = false) => `/api/voice/lot/${id}${drive ? "?drive=true" : ""}`,
   alert: (kind: "ice_on" | "ice_off" | "lot_full", destination: string, lotId?: number) =>
     `/api/voice/alert?${new URLSearchParams({ kind, destination, ...(lotId ? { lot_id: String(lotId) } : {}) })}`,
 };
 
 export interface CopilotAnswer {
-  transcript: string; intent: string; answer: string; destination: string; speech_path: string;
-  action: "directions" | null; lot: { id: number; slug: string; name: string; lat: number; lng: number } | null;
+  transcript: string; intent: string; answer: string; destination: string; speech_path: string | null;
+  /** wake mode: the clip didn't start with "Hey Parky" (ignored) / it was only "Hey Parky" (listen for the question) */
+  ignored?: boolean; listen_again?: boolean;
+  action: "directions" | null; lot: { id: number; slug: string; name: string; lat: number; lng: number; entrance?: [number, number] } | null;
   conversation_id: string; end_conversation: boolean; answered_by: "rules" | "gemini";
 }
 
 /** Voice co-pilot: a recorded question (ElevenLabs speech-to-text on the server) or typed text. */
-export async function askCopilot(q: { audioUri?: string; text?: string; destination: string; arrival?: string; accessible?: boolean; conversationId?: string | null }) {
+export async function askCopilot(q: { audioUri?: string; text?: string; destination: string; arrival?: string; accessible?: boolean; conversationId?: string | null; drive?: boolean; wake?: boolean }) {
+  // Phones: send the recording with the reliable uploader (native multipart, chunked fallback on networks that
+  // drop uploads), the same path photos use. Web keeps FormData with a Blob.
+  if (q.audioUri && !q.text && Platform.OS !== "web" && !q.audioUri.startsWith("blob:") && !q.audioUri.startsWith("data:")) {
+    return upload<CopilotAnswer>("/api/voice/ask", {
+      destination: q.destination, arrival: q.arrival, accessible: String(!!q.accessible),
+      conversation_id: q.conversationId ?? undefined, drive: q.drive ? "true" : undefined, wake: q.wake ? "true" : undefined,
+    }, { uri: q.audioUri, name: "question.m4a", mimeType: "audio/mp4" }, { shrink: false, mimeType: "audio/mp4", timeoutMs: 45000 });
+  }
   const fd = new FormData();
+  if (q.drive) fd.append("drive", "true");
+  if (q.wake) fd.append("wake", "true");
   if (q.text) fd.append("text", q.text);
   if (q.audioUri) {
     if (q.audioUri.startsWith("blob:") || q.audioUri.startsWith("data:")) {
@@ -301,5 +416,8 @@ export async function askCopilot(q: { audioUri?: string; text?: string; destinat
 }
 
 /** Google Maps driving directions to a point. Opens the Maps app when installed, the web otherwise. */
+/** Driving directions to a lot's real entrance (where a road enters it), falling back to its pin. */
+export const lotDirectionsUrl = (lot: { lat: number; lng: number; entrance?: [number, number] | null }) =>
+  directionsUrl(lot.entrance?.[0] ?? lot.lat, lot.entrance?.[1] ?? lot.lng);
 export const directionsUrl = (lat: number, lng: number, mode: "driving" | "walking" = "driving") =>
   `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=${mode}`;

@@ -82,7 +82,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refresh("lots", "state", "hazards", "notifications", "weather", "meta", "health", "crew");
     // health is polled too: it carries voice availability and must recover if launch-time fetch failed.
-    const t = setInterval(() => refresh("lots", "state", "hazards", "notifications", "health"), 15000);
+    const t = setInterval(() => refresh("lots", "state", "hazards", "notifications", "health", "meta"), 15000);
     const sub = AppState.addEventListener("change", (s) => { if (s === "active") refresh(); });
     return () => { clearInterval(t); sub.remove(); };
   }, [refresh]);

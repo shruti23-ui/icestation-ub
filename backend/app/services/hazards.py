@@ -14,7 +14,25 @@ from ..timeutil import iso, utcnow
 settings = get_settings()
 ROUTE_BUFFER_M = 45.0  # how close a report must be to the straight lot-to-building line
 CATEGORY_LABELS = {"ice": "Ice", "slush": "Slush", "snow": "Snow accumulation",
-                   "unplowed": "Unplowed path", "blocked_ramp": "Blocked curb ramp"}
+                   "unplowed": "Unplowed path", "blocked_ramp": "Blocked curb ramp", "other": "Other hazard"}
+
+# Typed description -> category, first match wins (ramp first: it's a hard stop for wheelchair users).
+_KEYWORDS = [
+    ("blocked_ramp", ("ramp", "wheelchair", "curb cut", "kerb")),
+    ("slush", ("slush",)),
+    ("unplowed", ("unplow", "not plowed", "unshovel", "not shoveled", "not shovelled", "deep snow")),
+    ("ice", ("ice", "icy", "glaze", "slippery", "slick", "frozen")),
+    ("snow", ("snow",)),
+]
+
+
+def category_from_text(text: str) -> str:
+    """Pick a hazard category from a student's description; 'other' when nothing matches. Pure; tested."""
+    t = (text or "").lower()
+    for cat, words in _KEYWORDS:
+        if any(w in t for w in words):
+            return cat
+    return "other"
 
 
 def ttl_for(category: str) -> timedelta:

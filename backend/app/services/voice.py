@@ -40,6 +40,42 @@ def _clock(hhmm: str) -> str:
     return f"{(h + 11) % 12 + 1}:{m:02d} {'AM' if h < 12 else 'PM'}"
 
 
+DRIVE_GREETING = "Hey, I'm Parky."
+DRIVE_OPTIONS = ("Tap to hear it again. Swipe left or right for other lots. Swipe up for directions. "
+                 "Swipe down to ask me a question.")
+
+
+def drive_intro_text(rec: dict) -> str:
+    """What drive mode says when it opens: a greeting, the briefing, then the gesture options."""
+    return f"{DRIVE_GREETING} {drive_briefing_text(rec)} {DRIVE_OPTIONS}"
+
+
+def drive_briefing_text(rec: dict) -> str:
+    """Drive mode: short, glanceable-by-ear lines. Lot first, numbers second, no data-source footnotes."""
+    best, backup = rec.get("best"), rec.get("backup")
+    dest = rec.get("destination", "your destination")
+    if not best:
+        return f"I couldn't find a lot with open spaces for {dest} right now."
+    parts = [f"For {dest}, park at {best['name']}. About {best['expected_open_spaces']} spaces open."]
+    if backup:
+        parts.append(f"If it's full, try {backup['name']}.")
+    if best.get("ice_buffer_minutes"):
+        parts.append("Roads may be icy, so allow extra time.")
+    route = best.get("route") or {}
+    if route.get("status") == "blocked":
+        parts.append("Heads up: a curb ramp on the walk from there is blocked.")
+    elif route.get("status") == "hazard":
+        parts.append("Watch your step on the walk in; a hazard was reported.")
+    return " ".join(parts)
+
+
+def drive_lot_text(lot: dict) -> str:
+    """Drive mode: one lot in one breath."""
+    if lot["available"] <= 0:
+        return f"{lot['name']} is full."
+    return f"{lot['name']}: about {lot['available']} of {lot['snow_adjusted_capacity']} spaces open."
+
+
 def briefing_text(rec: dict) -> str:
     """Turns a /api/parking/recommendations result into one or two short spoken sentences."""
     best, backup = rec.get("best"), rec.get("backup")
@@ -49,7 +85,6 @@ def briefing_text(rec: dict) -> str:
     parts = [
         f"For {dest}, the best option is {best['name']}, with about {best['expected_open_spaces']} spaces "
         f"expected open when you arrive at {_clock(rec['arrival_time'])}.",
-        f"Leave by {_clock(best['recommended_departure'])}.",
     ]
     if best.get("ice_buffer_minutes"):
         parts.append(f"Ice season is on, so that includes {best['ice_buffer_minutes']} extra minutes.")
@@ -62,14 +97,16 @@ def briefing_text(rec: dict) -> str:
         parts.append(f"If it fills up, try {backup['name']}.")
     if best.get("data_source") == "seed_model":
         parts.append("This is an estimate, not live UB parking data.")
+    elif best.get("data_source") == "demo":
+        parts.append("These are demo numbers, not live UB parking data.")
     return " ".join(parts)
 
 
 def lot_text(lot: dict) -> str:
     """Short spoken summary of one lot from lot_status()."""
-    estimate = lot["data_source"] == "seed_model"
+    basis = {"seed_model": " by our estimate", "demo": " in demo data"}.get(lot["data_source"], " based on a recent student report")
     s = (f"{lot['name']} has about {lot['available']} spaces open, and is {round(lot['occupancy_pct'])} percent full"
-         f"{' by our estimate' if estimate else ' based on a recent student report'}.")
+         f"{basis}.")
     if lot["snow_blocked_spaces"]:
         s += f" About {lot['snow_blocked_spaces']} spaces are blocked by snow."
     if lot["pending_departures"]:
@@ -87,7 +124,7 @@ def transcribe(data: bytes, filename: str = "question.m4a", content_type: str = 
         raise VoiceError(413, "Recording too long. Ask a short question.")
     try:
         r = httpx.post(STT_URL, headers={"xi-api-key": settings.elevenlabs_api_key.strip()},
-                       data={"model_id": settings.elevenlabs_stt_model},
+                       data={"model_id": settings.elevenlabs_stt_model, "language_code": "en", "tag_audio_events": "false"},
                        files={"file": (filename, data, content_type or "application/octet-stream")}, timeout=30)
     except httpx.HTTPError as exc:
         raise VoiceError(502, f"ElevenLabs unreachable: {type(exc).__name__}") from exc
@@ -103,7 +140,8 @@ def synthesize(text: str) -> bytes:
     if not configured():
         raise VoiceError(503, "Voice briefings are off. Set ELEVENLABS_API_KEY in backend/.env.")
     text = text[:MAX_CHARS]
-    key = hashlib.sha256(f"{settings.elevenlabs_voice_id}|{settings.elevenlabs_model}|{text}".encode()).hexdigest()
+    key = hashlib.sha256(f"{settings.elevenlabs_voice_id}|{settings.elevenlabs_model}|{settings.elevenlabs_stability}|"
+                         f"{settings.elevenlabs_speed}|{text}".encode()).hexdigest()
     with _cache_lock:
         if key in _cache:
             _cache.move_to_end(key)
@@ -113,7 +151,9 @@ def synthesize(text: str) -> bytes:
             API_URL.format(voice_id=settings.elevenlabs_voice_id),
             params={"output_format": "mp3_44100_128"},
             headers={"xi-api-key": settings.elevenlabs_api_key.strip(), "Accept": "audio/mpeg"},
-            json={"text": text, "model_id": settings.elevenlabs_model},
+            json={"text": text, "model_id": settings.elevenlabs_model,
+                  "voice_settings": {"stability": settings.elevenlabs_stability, "similarity_boost": settings.elevenlabs_similarity,
+                                     "style": 0.0, "use_speaker_boost": True, "speed": settings.elevenlabs_speed}},
             timeout=20,
         )
     except httpx.HTTPError as exc:

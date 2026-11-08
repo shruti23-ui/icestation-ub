@@ -25,7 +25,11 @@
         "CAMERA",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION"
-      ]
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0B0F2E"
+      }
     },
     "plugins": [
       "expo-router",
@@ -63,13 +67,26 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#04060E",
-          "resizeMode": "contain"
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#050817"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "WeParkit uses the camera to scan parking lots and icy walkways.",
+          "recordAudioAndroid": false
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "icon": "./assets/icon.png",
+    "web": {
+      "favicon": "./assets/favicon.png"
     }
   }
 }

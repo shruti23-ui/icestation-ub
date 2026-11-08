@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..campus import ENTRANCES
 from ..config import get_settings
 from ..models import Notification, ParkingLot, ParkingReport, SystemState
 from ..timeutil import iso, utcnow
@@ -57,6 +58,12 @@ def pending_departures(db: Session, lot_id: int, now_utc: datetime) -> int:
     ).all())
 
 
+def demo_occupancy(slug: str) -> float:
+    """Fixed, varied demo occupancy per lot (0.12-0.88), so lots differ from each other. Deterministic by slug."""
+    import zlib
+    return round(0.12 + 0.76 * (zlib.crc32(slug.encode()) % 1000) / 999, 3)
+
+
 def lot_status(db: Session, lot: ParkingLot, state: SystemState) -> dict:
     now_utc = utcnow()
     local, simulated = campus_now()
@@ -74,6 +81,14 @@ def lot_status(db: Session, lot: ParkingLot, state: SystemState) -> dict:
         last = report.created_at
         note = report.note
         expires = report.expires_at
+    elif lot.slug in settings.demo_full_slugs:
+        # Demo example of a full lot (DEMO_FULL_LOTS). Labelled "demo" everywhere; a real report replaces it.
+        occ, snow, snow_source = 1.0, 0.0, "none"
+        conf = 0.5
+        source = "demo"
+        last = None
+        note = "Demo data: shown as full for the demo, not a real report"
+        expires = None
     else:
         occ = profile_at(lot.hourly_profile, local.hour + local.minute / 60)
         snow, snow_source = 0.0, "none"
@@ -82,6 +97,10 @@ def lot_status(db: Session, lot: ParkingLot, state: SystemState) -> dict:
         last = None
         note = "Seed occupancy model (no crew report in the last 30 min)"
         expires = None
+        spread = demo_occupancy(lot.slug)
+        if settings.demo_occupancy_spread and spread > occ:
+            occ, source = spread, "demo"
+            note = "Demo data: example occupancy for this lot, not a real report"
 
     if ice and snow == 0 and not (report and report.source == "crew_scan"):
         snow = settings.ice_capacity_reduction_default
@@ -97,6 +116,8 @@ def lot_status(db: Session, lot: ParkingLot, state: SystemState) -> dict:
     return {
         "id": lot.id, "slug": lot.slug, "name": lot.name, "kind": lot.kind,
         "description": lot.description, "lat": lot.lat, "lng": lot.lng, "polygon": lot.polygon,
+        # Where a road enters the lot (OSM); apps send driving directions here. Falls back to the pin.
+        "entrance": list(ENTRANCES.get(lot.slug, (lot.lat, lot.lng))),
         "total_capacity": lot.total_capacity,
         "capacity_is_seed_estimate": lot.capacity_is_seed_estimate,
         "snow_adjusted_capacity": snow_cap,
@@ -130,7 +151,9 @@ def snapshot(db: Session, lot: ParkingLot, state: SystemState) -> LotSnapshot:
         slug=lot.slug, name=lot.name, kind=lot.kind, lat=lot.lat, lng=lot.lng,
         total_capacity=lot.total_capacity, occupancy_fraction=occ_frac,
         snow_blocked_fraction=s["snow_blocked_fraction"], confidence=s["confidence"],
-        hourly_profile=lot.hourly_profile, pending_departures=s["pending_departures"],
+        # Demo lots hold their demo level, so the recommendation matches what the lot list shows.
+        hourly_profile=[occ_frac] * 24 if s["data_source"] == "demo" else lot.hourly_profile,
+        pending_departures=s["pending_departures"],
         data_source=s["data_source"],
     )
 

@@ -10,6 +10,26 @@ official UB Parking data. `python -m scripts.init_db --reset` reloads it; startu
 import json
 from pathlib import Path
 
+from .config import get_settings
+
+_S = get_settings()
+
+
+def _scaled_capacities(lots: list[dict]) -> dict[str, int]:
+    """Map each lot's estimated size onto [min, max] by rank (percentile), rounded to `step`, so capacities
+    are spread out (some 20, some 30, ... some 50) and a bigger lot never gets fewer spaces than a smaller one."""
+    lo, hi, step = _S.lot_capacity_min, _S.lot_capacity_max, max(1, _S.lot_capacity_step)
+    if hi <= 0:
+        return {l["slug"]: l["total_capacity"] for l in lots}
+    ranked = sorted(lots, key=lambda l: (l["total_capacity"], l["slug"]))
+    n = max(1, len(ranked) - 1)
+    out = {}
+    for i, l in enumerate(ranked):
+        raw = lo + (hi - lo) * i / n
+        out[l["slug"]] = int(min(hi, max(lo, step * round(raw / step))))
+    return out
+
+
 # Typical weekday occupancy fraction by hour (0-23), by lot type.
 _COMMUTER = [0.05, 0.04, 0.04, 0.04, 0.05, 0.08, 0.15, 0.35, 0.62, 0.84, 0.93, 0.95,
              0.92, 0.90, 0.88, 0.80, 0.66, 0.48, 0.32, 0.25, 0.18, 0.12, 0.08, 0.06]
@@ -36,16 +56,26 @@ _DATA = json.loads((Path(__file__).with_name("ub_lots.json")).read_text(encoding
 OSM_ATTRIBUTION = _DATA["source"]
 
 LOTS: list[dict] = []
+# slug -> (lat, lng) where a mapped road enters the lot (scripts/import_lot_entrances.py). Directions go here,
+# not to the lot's centre pin, which Google would snap to whatever road is nearest (often the wrong side).
+ENTRANCES: dict[str, tuple[float, float]] = {}
 OUTLINE_SOURCE: dict[str, str] = {}  # slug -> "osm:way/<id>"; exposed by /api/parking/locate so the UI can be honest
+_CAPACITY = _scaled_capacities(_DATA["lots"])
 for _l in sorted(_DATA["lots"], key=lambda l: (_ORDER.index(l["slug"]) if l["slug"] in _ORDER else len(_ORDER), l["name"])):
-    _profile, _rows = _TUNED.get(_l["slug"], (_PROFILE[_l["kind"]], max(1, round(_l["total_capacity"] / 40))))
-    _desc = " · ".join(x for x in (_KIND_TEXT[_l["kind"]], _l.get("permit") or "Permit rules not listed: check UB Parking",
-                                   "capacity from OSM" if _l["capacity_source"] == "osm_tag" else "capacity estimated from lot area") if x)
+    _capacity = _CAPACITY[_l["slug"]]
+    _capped = _capacity != _l["total_capacity"]
+    _profile, _ = _TUNED.get(_l["slug"], (_PROFILE[_l["kind"]], 0))
+    _rows = max(1, round(_capacity / 10))
+    _cap_note = (f"{_capacity} spaces (project setting, scaled by lot size)" if _capped
+                 else "capacity from OSM" if _l["capacity_source"] == "osm_tag" else "capacity estimated from lot area")
+    _desc = " · ".join(x for x in (_KIND_TEXT[_l["kind"]], _l.get("permit") or "Permit rules not listed: check UB Parking", _cap_note) if x)
     LOTS.append({
         "slug": _l["slug"], "name": _l["name"], "kind": _l["kind"], "description": _desc[:200],
-        "lat": _l["lat"], "lng": _l["lng"], "polygon": _l["polygon"], "total_capacity": _l["total_capacity"],
-        "total_rows": _rows, "hourly_profile": _profile, "capacity_is_seed_estimate": _l["capacity_source"] != "osm_tag",
+        "lat": _l["lat"], "lng": _l["lng"], "polygon": _l["polygon"], "total_capacity": _capacity,
+        "total_rows": _rows, "hourly_profile": _profile, "capacity_is_seed_estimate": _capped or _l["capacity_source"] != "osm_tag",
     })
+    if _l.get("entrance"):
+        ENTRANCES[_l["slug"]] = (_l["entrance"][0], _l["entrance"][1])
     OUTLINE_SOURCE[_l["slug"]] = f"osm:{_l['osm']}"
 
 BUILDINGS = {

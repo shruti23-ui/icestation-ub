@@ -95,7 +95,7 @@ def list_samples():
 
 @router.post("/scan", response_model=ScanOut)
 async def scan(lot_id: int = Form(...), file: UploadFile | None = File(None), sample_id: str | None = Form(None),
-               db: Session = Depends(get_db)):
+               upload_id: str | None = Form(None), db: Session = Depends(get_db)):
     lot = _lot_or_404(db, lot_id)
     regions = None
     if sample_id:
@@ -106,6 +106,8 @@ async def scan(lot_id: int = Form(...), file: UploadFile | None = File(None), sa
         regions = json.loads(meta_path.read_text()) if meta_path.exists() else None
     elif file is not None:
         data = await file.read()
+    elif upload_id:
+        data = _take_upload(upload_id)
     else:
         raise HTTPException(400, "Attach a photo or choose a sample image.")
     try:
@@ -296,3 +298,48 @@ def checkout(body: CheckOutIn, request: Request, db: Session = Depends(get_db)):
     pts = award(db, user, "leaving", n.id)
     hub.publish("lots")
     return {"session": sessions.serialize(s, lot), "lot": lot_status(db, lot, get_state(db)), "points_awarded": pts}
+
+
+def _take_upload(upload_id: str) -> bytes:
+    from ..services import uploads
+    try:
+        return uploads.take(upload_id)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(400, str(exc).strip("'\"")) from exc
+
+
+@router.post("/upload-chunk")
+def upload_chunk(body: dict):
+    """One ~48 KB base64 piece of a photo (fallback for networks that drop large uploads). Memory only."""
+    from ..services import uploads
+    try:
+        index = int(body.get("index", 0))
+        uid = uploads.add_chunk(body.get("upload_id"), index, str(body.get("data", "")))
+    except (KeyError, ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc).strip("'\"")) from exc
+    return {"upload_id": uid, "received": index}
+
+
+@router.post("/client-log")
+def client_log(body: dict):
+    """The app reports upload failures here so they show up in the server log (debugging phones on campus Wi-Fi)."""
+    import logging
+    logging.getLogger("weparkit.client").warning("client: %s", str(body.get("message", ""))[:500])
+    return {"ok": True}
+
+
+@router.post("/live-detect")
+async def live_detect(file: UploadFile | None = File(None), upload_id: str | None = Form(None), save: bool = Form(False)):
+    """Live camera frame -> labelled object boxes (0-1 coords) and whether it's a parking scene.
+    The frame is analysed in memory only; nothing is stored."""
+    from fastapi.concurrency import run_in_threadpool
+    from ..services.vision.live import detect_live
+    if file is None and not upload_id:
+        raise HTTPException(400, "Send a frame.")
+    data = await file.read(6 * 1024 * 1024 + 1) if file is not None else _take_upload(upload_id)
+    if len(data) > 6 * 1024 * 1024:
+        raise HTTPException(413, "Frame too large; send a smaller preview image.")
+    try:
+        return await run_in_threadpool(detect_live, data, save)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc

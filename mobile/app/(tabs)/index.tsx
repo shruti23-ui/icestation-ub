@@ -1,153 +1,172 @@
 import { router, useFocusEffect } from "expo-router";
-import { Car, Navigation, Square, TriangleAlert, Volume2 } from "lucide-react-native";
+import { Car, ChevronRight } from "lucide-react-native";
 import { useCallback, useMemo, useState } from "react";
-import { Linking, Pressable, StyleSheet, View } from "react-native";
-import { api, availabilityTone, directionsUrl, hhmm12, sentence, voicePaths, type Recommendation } from "../../src/api";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { api, hhmm12, voicePaths, type Recommendation } from "../../src/api";
 import CampusMap from "../../src/components/CampusMap";
 import Header from "../../src/components/Header";
 import LotRow from "../../src/components/LotCard";
-import ModeToggle from "../../src/components/ModeToggle";
 import AskCard from "../../src/components/AskCard";
+import Choice from "../../src/components/Choice";
 import ParkingStatus from "../../src/components/ParkingStatus";
-import { Badge, Banner, Button, Card, DemoTag, Empty, List, Loading, Metrics, Section, Screen, T, row } from "../../src/components/ui";
+import { Banner, Card, Empty, List, Loading, Metrics, Section, Screen, Segmented, Select, T, row } from "../../src/components/ui";
 import { useStore } from "../../src/store";
 import { space } from "../../src/theme";
-import { useVoice } from "../../src/voice";
 import { useParking } from "../../src/parking";
+import { useCampusClock } from "../../src/campusTime";
 import { metersBetween } from "../../src/parkDetect";
 
 const DEFAULT_DEST = "Davis Hall";
 
 export default function Overview() {
-  const { c, lots, state, hazards, weather, meta, refresh, toast } = useStore();
+  const { c, lots, state, hazards, meta, user, refresh } = useStore();
   const [rec, setRec] = useState<Recommendation | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [detailed, setDetailed] = useState(false);
-  const [showAll, setShowAll] = useState(false);
+  // Lot list: 3 at first, "Load more" reveals 3 more at a time.
+  const PAGE = 3;
+  const [visible, setVisible] = useState(PAGE);
+  const clock = useCampusClock();   // live New York time
   const pk = useParking();
   // Nearest first when we know where you are; otherwise most open spaces first.
   const sortedLots = useMemo(() => {
     const all = (lots?.lots ?? []).map((lot) => ({ lot, d: pk.position ? Math.round(metersBetween(pk.position, lot)) : null }));
     return all.sort((a, b) => (a.d != null && b.d != null ? a.d - b.d : b.lot.available - a.lot.available));
   }, [lots, pk.position]);
-  const voice = useVoice();
 
+  const [dest, setDest] = useState(DEFAULT_DEST);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [assistMode, setAssistMode] = useState<"talk" | "drive">("talk");
   const loadRec = useCallback(async () => {
-    try { setRec(await api.recommend({ destination: DEFAULT_DEST, arrival: "", accessible: false })); }
+    try { setRec(await api.recommend({ destination: dest, arrival: "", accessible: user?.needs_accessible_routes ?? false, user_id: user?.id })); }
     catch { setRec(null); }
-  }, []);
+  }, [dest, user?.id, user?.needs_accessible_routes]);
   // Recompute when lots or mode change, or the tab regains focus.
   useFocusEffect(useCallback(() => { loadRec(); }, [loadRec, lots, state?.mode]));
 
   const onRefresh = async () => { setRefreshing(true); await refresh(); await loadRec(); setRefreshing(false); };
-  const reset = async () => {
-    try { await api.reset(); await refresh("lots", "state", "hazards", "notifications", "weather", "crew"); toast("Demo data reset"); }
-    catch (e) { toast((e as Error).message, "error"); }
-  };
 
   const t = lots?.totals;
   const best = rec?.best;
-  const alerts = weather?.alerts ?? [];
+  const others = best ? (rec?.all ?? []).filter((e) => e.slug !== best.slug && e.expected_open_spaces > 0).slice(0, 2) : [];
 
   return (
-    <Screen header={<Header brand title="WeParkit" subtitle={`UB North Campus${meta ? ` · ${hhmm12(meta.campus_time)}${meta.simulated_clock ? " (simulated clock)" : ""}` : ""}`} />}
+    <Screen header={<Header brand title="WeParkit" subtitle={`UB North Campus · ${meta?.simulated_clock ? `${hhmm12(meta.campus_time)} (simulated clock)` : `${clock.label} ${clock.zone}`}`} />}
       onRefresh={onRefresh} refreshing={refreshing}>
 
       <ParkingStatus />
 
-      <AskCard destination={DEFAULT_DEST} />
+      <Section>
+        <Select label="Destination" title="Destination" value={dest}
+          options={(meta?.buildings ?? [{ name: DEFAULT_DEST }]).map((b) => ({ value: b.name, label: b.name }))} onChange={setDest} />
+        {rec ? (rec.best ? <Choice e={rec.best} primary briefing={voicePaths.briefing(dest)} /> : <Banner tone="warn">{rec.explanation}</Banner>)
+          : <Loading label="Calculating recommendation" />}
+        {/* Options 2 and 3 (next best-scoring lots with space) stay folded until "Load more". */}
+        {rec?.best && moreOpen && others.map((e, i) => <Choice key={e.slug} e={e} rank={i + 2} />)}
+        {rec?.best && others.length > 0 && (
+          <Pressable accessibilityRole="button" onPress={() => setMoreOpen((v) => !v)}
+            style={({ pressed }) => ({ alignItems: "center", paddingVertical: space.sm, opacity: pressed ? 0.7 : 1 })}>
+            <T v="label" color={c.accent}>{moreOpen ? "Show fewer" : `Load more (${others.length} more option${others.length === 1 ? "" : "s"})`}</T>
+          </Pressable>
+        )}
+      </Section>
 
-      <Section title="UB parking map" footer="Numbers are estimated open spaces. Tap a lot for Google Maps directions.">
+      {/* One assistant card, two modes: Talk (ask by voice or text) and Drive (hands-free gestures). */}
+      <Section>
+        <Segmented options={[{ value: "talk", label: "Talk" }, { value: "drive", label: "Drive" }]} value={assistMode} onChange={setAssistMode} />
+        {assistMode === "talk" ? <AskCard destination={dest} /> : <DriveCard destination={dest} />}
+      </Section>
+
+      <Section title="UB parking map" footer={<MapLegend />}>
         {lots ? <CampusMap lots={lots.lots} hazards={hazards} meta={meta} highlightSlug={best?.slug} height={340} />
           : <Empty title="Map appears once lot data loads" />}
       </Section>
 
-      <Section title={`Recommended for ${DEFAULT_DEST}`}>
-        <Card onPress={() => router.push("/dock")} style={{ gap: space.md }}>
-          {best ? (
-            <>
-              <View style={row.between}>
-                <T v="caption">Arriving {hhmm12(rec?.arrival_time)}</T>
-                <Badge tone={availabilityTone(best.label)}>{sentence(best.label)}</Badge>
-              </View>
-              <View style={[row.between, { alignItems: "flex-end" }]}>
-                <View style={{ flex: 1, gap: 2 }}>
-                  <T v="heading">{best.name}</T>
-                  <T v="caption">~{best.expected_open_spaces} spaces open{state?.mode === "ice" ? " · snow-adjusted" : ""}</T>
-                </View>
-                <View style={{ alignItems: "flex-end", gap: 2 }}>
-                  <T v="caption">Leave by</T>
-                  <T v="heading" color={c.accent} style={{ fontVariant: ["tabular-nums"] }}>{hhmm12(best.recommended_departure)}</T>
-                </View>
-              </View>
-              <View style={row.between}>
-                <View style={row.gap}>
-                  <Button size="sm" title="Directions" icon={<Navigation size={14} color={c.onAccent} />}
-                    onPress={() => { const l = lots?.lots.find((x) => x.slug === best.slug); if (l) Linking.openURL(directionsUrl(l.lat, l.lng)).catch(() => {}); }} />
-                  {(
-                    <Button size="sm" variant="secondary" title={voice.playing === "briefing" ? "Stop" : "Listen"}
-                      icon={voice.playing === "briefing" ? <Square size={13} color={c.text} /> : <Volume2 size={15} color={c.text} />}
-                      onPress={() => (voice.playing === "briefing" ? voice.stop() : voice.play(voicePaths.briefing(DEFAULT_DEST), "briefing"))} />
-                  )}
-                </View>
-                <Button size="sm" variant="secondary" title="Drive" icon={<Car size={15} color={c.text} />}
-                  onPress={() => router.push({ pathname: "/drive", params: { destination: DEFAULT_DEST } })} />
-              </View>
-            </>
-          ) : <Loading label="Calculating recommendation" />}
-        </Card>
-      </Section>
-
-      <Section title="Conditions">
-        <ModeToggle />
-        {alerts.slice(0, 2).map((a) => (
-          <Banner key={a.id} tone={a.winter ? "warn" : "neutral"} onPress={() => router.push("/orbit")}
-            icon={<TriangleAlert size={18} color={a.winter ? c.warn : c.textMuted} />}
-            title={<View style={row.gap}><T v="subheading" color={a.winter ? c.warn : c.text}>{a.event}</T>{a.demo && <DemoTag />}</View>}>
-            {a.headline}
-          </Banner>
-        ))}
-      </Section>
-
-      {t && (
-        <Metrics items={[
-          { label: "Spaces open", value: `~${t.available}` },
-          { label: "Occupancy", value: `${Math.round(t.occupancy_pct)}%` },
-          { label: "Snow-blocked", value: t.snow_blocked_spaces, color: t.snow_blocked_spaces ? c.warn : undefined },
-          { label: "Hazards", value: hazards.length, color: hazards.length ? c.warn : undefined },
-        ]} />
-      )}
-
-      <Section title={pk.position ? `Nearest UB lots (${lots?.lots.length ?? 0} total)` : `UB lots (${lots?.lots.length ?? 0})`}
+      <Section title={pk.position ? "Nearest UB lots" : `UB lots (${lots?.lots.length ?? 0})`}
         action={{ label: detailed ? "Less detail" : "More detail", onPress: () => setDetailed((d) => !d) }}
-        footer={`${lots?.disclaimer ?? ""} Lot outlines © OpenStreetMap contributors.`}>
+>
         {lots ? (
           <Card padded={false}>
-            <List>{sortedLots.slice(0, showAll ? undefined : 8).map(({ lot: l, d }) => (
+            <List>{sortedLots.slice(0, visible).map(({ lot: l, d }) => (
               <LotRow key={l.id} lot={l} detailed={detailed} highlight={l.slug === best?.slug} distanceM={d} />
             ))}</List>
-            {sortedLots.length > 8 && (
-              <Pressable onPress={() => setShowAll((v) => !v)} style={{ padding: space.lg, alignItems: "center", borderTopWidth: StyleSheet.hairlineWidth * 2, borderTopColor: c.divider }}>
-                <T v="label" color={c.accent}>{showAll ? "Show fewer" : `Show all ${sortedLots.length} lots`}</T>
+            {sortedLots.length > PAGE && (
+              <Pressable accessibilityRole="button"
+                onPress={() => setVisible((v) => (v >= sortedLots.length ? PAGE : Math.min(v + PAGE, sortedLots.length)))}
+                style={({ pressed }) => ({ padding: space.lg, alignItems: "center", gap: 2, borderTopWidth: StyleSheet.hairlineWidth * 2,
+                  borderTopColor: c.divider, opacity: pressed ? 0.7 : 1 })}>
+                <T v="label" color={c.accent}>{visible >= sortedLots.length ? "Show fewer" : "Load more"}</T>
+                <T v="caption">{`Showing ${Math.min(visible, sortedLots.length)} of ${sortedLots.length} lots`}</T>
               </Pressable>
             )}
           </Card>
         ) : <Loading label="Loading lots" />}
       </Section>
 
+      {t && (
+        <Section title="Campus at a glance"
+          footer={`About ${t.available.toLocaleString()} of ${t.total_capacity.toLocaleString()} spaces are open across ${lots?.lots.length ?? 0} UB lots, `
+            + `${Math.round(t.occupancy_pct)}% full overall, with ${hazards.length} active hazard report${hazards.length === 1 ? "" : "s"}. `
+            + "Counts are estimates and demo data, not live UB numbers."}>
+          <Metrics center items={[
+            { label: "Spaces open", value: `~${t.available}` },
+            { label: "Occupancy", value: `${Math.round(t.occupancy_pct)}%` },
+            { label: "Hazards", value: hazards.length, color: hazards.length ? c.warn : undefined },
+          ]} />
+        </Section>
+      )}
 
-      <Section title="Demo" footer="Uses a bundled sample photo, a simulated GOES-19 storm and a demo weather alert. Everything simulated is labelled.">
-        <Card style={{ gap: space.md }}>
-          <View style={{ gap: 2 }}>
-            <T v="subheading">Guided walkthrough</T>
-            <T v="caption">Scan a lot, replay a lake-effect storm, switch to ice season and see the recommendation update. About a minute.</T>
-          </View>
-          <View style={row.gap}>
-            <Button title="Start" onPress={() => router.push("/demo")} style={{ flex: 1 }} />
-            <Button title="Reset data" variant="secondary" onPress={reset} style={{ flex: 1 }} />
-          </View>
-        </Card>
-      </Section>
+
+
     </Screen>
+  );
+}
+
+/** Map key, shown right under the map: what the coloured "open/total" labels mean. */
+function MapLegend() {
+  const { c } = useStore();
+  const items = [
+    { color: c.success, label: "Plenty open" },
+    { color: c.warn, label: "Filling up" },
+    { color: c.danger, label: "Full (20/20 = all taken)" },
+  ];
+  return (
+    <View style={{ gap: 6 }}>
+      <View style={[row.wrap, { gap: space.md }]}>
+        {items.map((i) => (
+          <View key={i.label} style={row.gap}>
+            <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: i.color, borderWidth: 2, borderColor: "#FFFFFF" }} />
+            <T v="caption" color={c.text}>{i.label}</T>
+          </View>
+        ))}
+        <View style={row.gap}>
+          <View style={{ backgroundColor: c.success, borderRadius: 9, paddingHorizontal: 6, paddingVertical: 1, borderWidth: 1.5, borderColor: "#FFFFFF" }}>
+            <Text style={{ color: "#04210F", fontSize: 10, fontWeight: "700" }}>12/30</Text>
+          </View>
+          <T v="caption" color={c.text}>spaces open / total</T>
+        </View>
+      </View>
+      <T v="caption">Space counts are estimates. Tap a lot for directions; zoom in for lot names. Map © OpenStreetMap contributors.</T>
+    </View>
+  );
+}
+
+/** Entry to Drive mode: hands-free briefing, gestures and voice, for when you're behind the wheel. */
+function DriveCard({ destination }: { destination: string }) {
+  const { c } = useStore();
+  return (
+    <Card onPress={() => router.push({ pathname: "/drive", params: { destination } })}>
+      <View style={[row.gap, { gap: space.md }]}>
+        <View style={{ width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center", backgroundColor: c.accentSoft,
+          borderWidth: 2, borderColor: c.accent }}>
+          <Car size={28} color={c.accent} />
+        </View>
+        <View style={{ flex: 1, gap: 2 }}>
+          <T v="subheading">Drive mode</T>
+          <T v="caption">Hands-free while driving: big screen, spoken briefing, tap and swipe gestures, voice questions.</T>
+        </View>
+        <ChevronRight size={20} color={c.textMuted} />
+      </View>
+    </Card>
   );
 }

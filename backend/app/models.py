@@ -12,7 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from .database import Base
 from .timeutil import utcnow
 
-HAZARD_CATEGORIES = ("ice", "slush", "snow", "unplowed", "blocked_ramp")
+HAZARD_CATEGORIES = ("ice", "slush", "snow", "unplowed", "blocked_ramp", "other")
 
 
 class TimestampMixin:

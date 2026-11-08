@@ -13,11 +13,19 @@ def test_all_ub_lots_from_osm():
     assert len({l["slug"] for l in LOTS}) == len(LOTS)
 
 
-def test_capacities_are_labelled_estimates():
-    cft = next(l for l in LOTS if l["slug"] == "center-for-tomorrow")
-    assert cft["total_capacity"] == 400 and cft["capacity_is_seed_estimate"] is False  # OSM capacity tag
-    assert all(l["capacity_is_seed_estimate"] for l in LOTS if l["slug"] != "center-for-tomorrow")
-    assert all("estimated" in l["description"] or "from OSM" in l["description"] for l in LOTS)
+def test_capacities_scaled_15_to_30_by_lot_size():
+    import json
+    from pathlib import Path
+    caps = {l["slug"]: l["total_capacity"] for l in LOTS}
+    assert all(15 <= v <= 30 and v % 5 == 0 for v in caps.values())           # project setting: 15..30, steps of 5
+    assert {15, 20, 25, 30} <= set(caps.values())                             # varied, capped at 30
+    raw = {l["slug"]: l["total_capacity"] for l in json.loads(Path("app/ub_lots.json").read_text())["lots"]}
+    for a in raw:                                                             # a bigger lot never gets fewer spaces
+        for b in raw:
+            if raw[a] > raw[b]:
+                assert caps[a] >= caps[b], (a, b)
+    assert all(l["capacity_is_seed_estimate"] for l in LOTS)                  # nothing here is official UB data
+    assert all(l["total_rows"] >= 1 for l in LOTS)
 
 
 def test_sync_adds_new_lots_to_an_existing_db_without_renumbering(client):
@@ -43,3 +51,52 @@ def test_nearest_lot_detection_uses_real_outlines(client):
     gov_a = next(l for l in LOTS if l["name"] == "Governors A")
     r = client.get("/api/parking/locate", params={"lat": gov_a["lat"], "lng": gov_a["lng"], "accuracy_m": 15}).json()
     assert r["lot"]["name"] == "Governors A" and r["method"] == "inside_outline"
+
+
+def test_demo_full_lots_are_full_and_labelled(client, monkeypatch):
+    from app.services import lot_state
+    monkeypatch.setattr(lot_state.settings, "demo_full_lots", "jarvis-a,ketter-lot")
+    lots = {l["slug"]: l for l in client.get("/api/parking/lots").json()["lots"]}
+    for slug in ("jarvis-a", "ketter-lot"):
+        assert lots[slug]["available"] == 0 and lots[slug]["data_source"] == "demo" and "Demo data" in lots[slug]["note"]
+    assert lots["hochstetter-b"]["data_source"] == "seed_model"
+    # the recommendation avoids a full lot
+    rec = client.get("/api/parking/recommendations", params={"destination": "Davis Hall"}).json()
+    assert rec["best"]["slug"] not in ("jarvis-a", "ketter-lot")
+    # a real student report replaces the demo state
+    client.post("/api/parking/report", json={"lot_id": 1, "occupancy_pct": 40})
+    assert client.get("/api/parking/lots/1").json()["data_source"] == "crew_manual"
+
+
+def test_every_lot_has_a_road_entrance_on_its_outline(client):
+    """Directions go to where a mapped road enters the lot, not the centre pin."""
+    from app.campus import ENTRANCES
+    from app.services.geo import distance_to_polygon_m, haversine_m
+    assert len(ENTRANCES) == len(LOTS)
+    for lot in client.get("/api/parking/lots").json()["lots"]:
+        e = lot["entrance"]
+        assert distance_to_polygon_m(e[0], e[1], lot["polygon"]) < 2, lot["name"]        # on the outline
+        assert haversine_m((e[0], e[1]), (lot["lat"], lot["lng"])) < 400, lot["name"]   # and at this lot
+
+
+def test_demo_occupancy_spread_varies_lots_and_is_labelled(client, monkeypatch):
+    from app.services import lot_state
+    monkeypatch.setattr(lot_state.settings, "demo_occupancy_spread", True)
+    lots = client.get("/api/parking/lots").json()["lots"]
+    pcts = {round(l["occupancy_pct"]) for l in lots}
+    assert len(pcts) >= 10                                   # lots differ from each other
+    for l in lots:
+        if l["data_source"] == "demo":
+            assert "Demo data" in l["note"] and 12 <= l["occupancy_pct"] <= 100
+    assert lot_state.demo_occupancy("jarvis-b") == lot_state.demo_occupancy("jarvis-b")  # stable per lot
+
+
+def test_recommendation_matches_demo_lot_numbers(client, monkeypatch):
+    from app.services import lot_state
+    monkeypatch.setattr(lot_state.settings, "demo_occupancy_spread", True)
+    lots = {l["slug"]: l for l in client.get("/api/parking/lots").json()["lots"]}
+    rec = client.get("/api/parking/recommendations", params={"destination": "Davis Hall"}).json()
+    for e in rec["all"]:
+        lot = lots[e["slug"]]
+        if lot["data_source"] == "demo":
+            assert abs(e["expected_open_spaces"] - lot["available"]) <= 3, e["name"]

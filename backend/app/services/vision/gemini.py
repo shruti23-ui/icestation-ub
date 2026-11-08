@@ -44,10 +44,10 @@ def available() -> bool:
     return bool(settings.gemini_api_key)
 
 
-def _call(image: np.ndarray, prompt: str) -> dict | None:
+def _call(image: np.ndarray, prompt: str, thinking: str | None = None, quality: int = 85) -> dict | None:
     if not available():
         return None
-    ok, buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    ok, buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
     if not ok:
         return None
     body = {
@@ -56,8 +56,8 @@ def _call(image: np.ndarray, prompt: str) -> dict | None:
             {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(buf.tobytes()).decode()}},
         ]}],
         "generationConfig": {"response_mime_type": "application/json", "temperature": 0.1,
-                             **({"thinkingConfig": {"thinkingLevel": settings.gemini_thinking_level}}
-                                if settings.gemini_thinking_level else {})},
+                             **({"thinkingConfig": {"thinkingLevel": thinking or settings.gemini_thinking_level}}
+                                if (thinking or settings.gemini_thinking_level) else {})},
     }
     # Key goes in a header, not the query string, so it never lands in httpx/uvicorn logs.
     headers = {"x-goog-api-key": settings.gemini_api_key.strip()}

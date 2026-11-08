@@ -29,6 +29,16 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.5-flash"
     # Gemini 3 "thinking" effort. "low" keeps a scan around 3 s; empty omits it (needed for 2.x models).
     gemini_thinking_level: str = "low"
+    # Live camera boxes on the Capture tab: "opencv" = local issue detector (fast, ~50 ms, no AI),
+    # "gemini" = Gemini object detection (~4 s per frame, richer labels; falls back to opencv).
+    live_vision_provider: str = "opencv"
+    # Where the general object detector runs: "gpu" (OpenCL, e.g. the laptop's NVIDIA RTX), "cpu", or "auto"
+    # (GPU when OpenCV sees an OpenCL GPU, else CPU). The GPU is warmed up at startup (first run compiles kernels).
+    vision_device: str = "auto"
+    # Image storage (services/media_store.py). Hackathon: keep privacy-blurred live frames in data/captures/ and never
+    # auto-delete. Production: CAPTURE_SAVE=false and MEDIA_RETENTION_HOURS=24 (or 1) for short-term caching only.
+    capture_save: bool = True   # frames are saved only when the student taps Capture
+    media_retention_hours: float = 0.0
 
     # --- Satellite / weather ------------------------------------------------
     satellite_live_enabled: bool = True
@@ -49,7 +59,12 @@ class Settings(BaseSettings):
     # --- Voice (ElevenLabs) ---------------------------------------------------
     # Server-side only: the key never ships in the mobile bundle. Empty = voice briefings disabled.
     elevenlabs_api_key: str = ""
-    elevenlabs_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"
+    # Default: "Sarah", a soft, gentle female voice. Any ElevenLabs voice id works.
+    elevenlabs_voice_id: str = "EXAVITQu4vr4xnSDxMaL"
+    # Calm, steady delivery for spoken instructions (higher stability = gentler, less dramatic).
+    elevenlabs_stability: float = 0.7
+    elevenlabs_similarity: float = 0.8
+    elevenlabs_speed: float = 1.1   # 0.7-1.2; 1.0 is the voice's natural pace
     elevenlabs_model: str = "eleven_flash_v2_5"
     elevenlabs_stt_model: str = "scribe_v1"   # speech-to-text for the voice co-pilot
 
@@ -74,6 +89,23 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = "WeParkit <no-reply@weparkit.local>"
 
+    # --- Lots ---------------------------------------------------------------
+    # Project setting: lot capacities are scaled into this range by relative lot size (the biggest lots get
+    # the max, the smallest the min), rounded to `step`. The OSM area estimate is kept in app/ub_lots.json.
+    # Set lot_capacity_max=0 to use the raw estimates instead.
+    lot_capacity_min: int = 15
+    lot_capacity_max: int = 30
+    lot_capacity_step: int = 5
+    # Demo examples: these lots show as FULL (labelled "demo") until a real student report replaces them.
+    # Comma-separated slugs; empty = none.
+    demo_full_lots: str = "jarvis-a,ketter-lot,governors-c"
+    # Demo: give every lot its own occupancy level (12-88%, fixed per lot) when the time-of-day model would show
+    # them all nearly empty (nights, weekends). Labelled "Demo data"; a real student report replaces it.
+    demo_occupancy_spread: bool = True
+    # Demo: two example hazard reports on the Reports tab (labelled "Demo"), re-created at startup when none are
+    # active. A real report or "It's clear" votes work on them like any other.
+    demo_hazards: bool = True
+
     # --- Decision thresholds -----------------------------------------------
     ice_arrival_threshold_min: int = 60
     ice_capacity_reduction_default: float = 0.18   # used when a lot has no snow scan data
@@ -96,6 +128,10 @@ class Settings(BaseSettings):
     # Optional HH:MM. When set, the occupancy model and recommendations run as if it were
     # this time of day (handy for demos at 2 AM). Shown in the UI as SIMULATED CLOCK.
     sim_clock: str = ""
+
+    @property
+    def demo_full_slugs(self) -> set[str]:
+        return {s.strip() for s in self.demo_full_lots.split(",") if s.strip()}
 
     @property
     def email_domains(self) -> list[str]:

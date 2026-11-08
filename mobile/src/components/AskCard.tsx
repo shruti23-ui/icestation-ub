@@ -1,5 +1,6 @@
-import { Mic, Send, Square, Volume2, X } from "lucide-react-native";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { ArrowUp, Mic, Send, Square, Volume2, X } from "lucide-react-native";
+import { useState } from "react";
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { useCopilot } from "../copilot";
 import { useStore } from "../store";
 import { radius, space } from "../theme";
@@ -14,6 +15,8 @@ export default function AskCard({ destination }: { destination: string }) {
   const { c } = useStore();
   const cp = useCopilot({ destination });
   const { phase, active } = cp;
+  const [typed, setTyped] = useState("");
+  const sendTyped = () => { const q = typed.trim(); if (!q || phase === "thinking") return; setTyped(""); cp.askText(q); };
 
   const label = phase === "listening" ? "Listening… tap when you're done"
     : phase === "thinking" ? "Thinking…"
@@ -21,7 +24,7 @@ export default function AskCard({ destination }: { destination: string }) {
         : "Talk to WeParkit";
   const hint = phase === "listening" ? "I'll answer when you pause."
     : active ? "Hands-free: I keep listening after each answer. Say “thanks” to finish."
-      : "Tap once and ask anything about UB parking. It's a conversation, so ask follow-ups.";
+      : "Tap the mic and ask, or type below. It's a conversation, so ask follow-ups.";
   const color = phase === "listening" ? c.danger : phase === "speaking" ? c.success : c.accent;
 
   const onMain = () => {
@@ -77,6 +80,19 @@ export default function AskCard({ destination }: { destination: string }) {
           </View>
         </View>
       )}
+
+      {/* Prefer typing? Ask here; the answer shows in the chat and is read aloud. */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, backgroundColor: c.surfaceSolid, borderRadius: radius.pill,
+        borderWidth: StyleSheet.hairlineWidth * 2, borderColor: c.border, paddingLeft: space.md, paddingRight: 4 }}>
+        <TextInput value={typed} onChangeText={setTyped} placeholder="Or type a question…" placeholderTextColor={c.textFaint}
+          onSubmitEditing={sendTyped} returnKeyType="send" maxLength={300} accessibilityLabel="Type a question"
+          style={{ flex: 1, color: c.text, fontSize: 15, paddingVertical: 10 }} />
+        <Pressable onPress={sendTyped} disabled={!typed.trim() || phase === "thinking"} accessibilityLabel="Send question" hitSlop={6}
+          style={{ width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center",
+            backgroundColor: typed.trim() ? c.accent : c.surfaceAlt }}>
+          <ArrowUp size={18} color={typed.trim() ? c.onAccent : c.textMuted} />
+        </Pressable>
+      </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm }}>
         {SUGGESTIONS.map((q) => (

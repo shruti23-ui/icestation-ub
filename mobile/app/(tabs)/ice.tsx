@@ -1,27 +1,19 @@
-import { router, useFocusEffect } from "expo-router";
+import { router } from "expo-router";
 import { Check, Plus, Snowflake, X } from "lucide-react-native";
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { Image, View } from "react-native";
-import { api, ago, media, type Route } from "../../src/api";
+import { api, ago, media } from "../../src/api";
 import CampusMap from "../../src/components/CampusMap";
 import Header from "../../src/components/Header";
-import { Badge, Banner, Button, Card, Chips, DemoTag, Empty, List, ListRow, Section, Screen, T, row } from "../../src/components/ui";
+import { Banner, Button, Card, DemoTag, Empty, Section, Screen, T, row } from "../../src/components/ui";
 import { useStore } from "../../src/store";
 import { radius, space } from "../../src/theme";
 
-const routeBadge = (s: Route["status"]) =>
-  s === "blocked" ? { tone: "danger" as const, label: "Impassable" } : s === "hazard" ? { tone: "warn" as const, label: "Hazard" } : { tone: "neutral" as const, label: "Unverified" };
 
-export default function Walkways() {
+export default function Reports() {
   const { c, lots, hazards, meta, user, state, refresh, toast } = useStore();
-  const [dest, setDest] = useState("Davis Hall");
-  const [routes, setRoutes] = useState<(Route & { lot: string; slug: string })[]>([]);
   const [busy, setBusy] = useState<number | null>(null);
 
-  const loadRoutes = useCallback(async () => {
-    try { setRoutes((await api.routes(dest)).routes); } catch (e) { toast((e as Error).message, "error"); }
-  }, [dest, toast]);
-  useFocusEffect(useCallback(() => { loadRoutes(); }, [loadRoutes, hazards]));
 
   const vote = async (id: number, kind: "confirm" | "clear") => {
     if (!user) return;
@@ -35,15 +27,16 @@ export default function Walkways() {
   };
 
   return (
-    <Screen header={<Header title="Walkways" subtitle="Reported ice, snow and blocked ramps" />} onRefresh={() => refresh("hazards")}>
+    <Screen header={<Header title="Reports" subtitle="Hazards reported by students around North Campus" />} onRefresh={() => refresh("hazards")}>
       {state?.mode === "ice" && (
         <Banner tone="warn" icon={<Snowflake size={18} color={c.warn} />} title="Ice season is on">
           Walk times are slower and unreported paths may be icy.
         </Banner>
       )}
-      <Button title="Report a hazard" icon={<Plus size={16} color={c.onAccent} />} onPress={() => router.push({ pathname: "/scan", params: { mode: "ice" } })} />
+      <Button title="Report a hazard" icon={<Plus size={16} color={c.onAccent} />} onPress={() => router.push("/report-hazard")} />
 
-      {lots && <CampusMap lots={lots.lots} hazards={hazards} meta={meta} height={260} />}
+      {/* Hazard pins only: no lot space counts on this map */}
+      {lots && <CampusMap lots={lots.lots} hazards={hazards} meta={meta} height={260} counts={false} />}
 
       <Section title={`Active reports (${hazards.length})`}>
         {hazards.length === 0 ? (
@@ -59,6 +52,9 @@ export default function Walkways() {
             </View>
             <View style={{ gap: 2 }}>
               <T v="body">{h.location_name}</T>
+              {h.classified_by === "reporter" && h.explanation && h.explanation !== "Reported by a student." && (
+                <T v="caption" color={c.text}>“{h.explanation}”</T>
+              )}
               <T v="caption">Reported {ago(h.created_at)} · {h.confirmations} confirmed · {h.clear_votes} cleared</T>
               {h.hard_stop_for_wheelchairs && <T v="caption" color={c.danger}>Not passable by wheelchair.</T>}
             </View>
@@ -71,17 +67,6 @@ export default function Walkways() {
         ))}
       </Section>
 
-      <Section title="Route conditions" footer="Routes are never marked safe without reports. Blocked curb ramps are treated as impassable for wheelchairs.">
-        <Chips options={(meta?.buildings ?? []).map((b) => ({ value: b.name, label: b.name }))} value={dest} onChange={setDest} />
-        <Card padded={false}>
-          <List>
-            {routes.map((r) => {
-              const b = routeBadge(r.status);
-              return <ListRow key={r.slug} title={`${r.lot} → ${dest}`} subtitle={r.label} right={<Badge tone={b.tone}>{b.label}</Badge>} />;
-            })}
-          </List>
-        </Card>
-      </Section>
     </Screen>
   );
 }

@@ -29,3 +29,5 @@ mobile/ios/
 mobile/android/
 npm-debug.*
 .DS_Store
+backend/data/models/*.weights
+backend/data/captures/

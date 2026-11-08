@@ -11,6 +11,7 @@ error with a request id (and a logged traceback), startup never aborts on non-cr
 from __future__ import annotations
 
 import asyncio
+import threading
 import logging
 import time
 import uuid
@@ -53,6 +54,7 @@ async def expiry_loop() -> None:
     """Every 30 s: expire hazards and tell clients when crew parking reports age out. Never dies."""
     from .services.hazards import expire_hazards
     last_live = None
+    last_sweep = 0.0
     while True:
         try:
             def tick() -> tuple[int, int]:
@@ -66,6 +68,10 @@ async def expiry_loop() -> None:
             if last_live is not None and live < last_live:
                 hub.publish("lots")
             last_live = live
+            if time.time() - last_sweep > 3600:   # hourly: delete images past MEDIA_RETENTION_HOURS (0 = keep)
+                last_sweep = time.time()
+                from .services.media_store import sweep
+                await anyio.to_thread.run_sync(sweep)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -110,6 +116,14 @@ async def lifespan(_: FastAPI):
     if settings.weather_live_enabled:
         _safe("warm NWS weather", weather.nws_cache.warm)
     task = asyncio.create_task(expiry_loop())
+    # Load the object detector (and warm the GPU) in the background so the first camera frame is fast.
+    def _warm_detector() -> None:
+        try:
+            from .services.vision import coco
+            coco.available()
+        except Exception:  # noqa: BLE001 - optional component; never block startup
+            log.exception("detector warm-up failed")
+    threading.Thread(target=_warm_detector, daemon=True).start()
     log.info("WeParkit API ready")
     yield
     task.cancel()
@@ -206,6 +220,13 @@ async def unhandled(request: Request, exc: Exception):
 
 
 # ------------------------------------------------------------------ system
+
+@app.get("/api/media", tags=["system"])
+def media_stats():
+    """How many images are kept, and the storage policy (CAPTURE_SAVE, MEDIA_RETENTION_HOURS)."""
+    from .services.media_store import stats
+    return stats()
+
 
 @app.get("/api/health", response_model=HealthOut, tags=["system"])
 def health(db: Session = Depends(get_db)):

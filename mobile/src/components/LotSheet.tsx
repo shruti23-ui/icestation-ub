@@ -1,6 +1,6 @@
 import { Navigation, Square, Volume2, X } from "lucide-react-native";
 import { Linking, StyleSheet, View } from "react-native";
-import { directionsUrl, lotFull, sourceLabel, voicePaths, type Lot } from "../api";
+import { lotDirectionsUrl, lotFull, sourceLabel, voicePaths, type Lot } from "../api";
 import { useStore } from "../store";
 import { radius, space } from "../theme";
 import { useVoice } from "../voice";
@@ -13,7 +13,7 @@ export default function LotSheet({ lot, onClose }: { lot: Lot; onClose: () => vo
   const speaking = voice.playing === `lot-${lot.id}`;
   const full = lotFull(lot);
 
-  const directions = () => Linking.openURL(directionsUrl(lot.lat, lot.lng)).catch(() => toast("Couldn't open Google Maps.", "error"));
+  const directions = () => Linking.openURL(lotDirectionsUrl(lot)).catch(() => toast("Couldn't open Google Maps.", "error"));
 
   return (
     <View style={{ position: "absolute", left: space.sm, right: space.sm, bottom: space.sm, backgroundColor: c.surfaceSolid, borderRadius: radius.lg,
@@ -23,9 +23,9 @@ export default function LotSheet({ lot, onClose }: { lot: Lot; onClose: () => vo
         <View style={{ flex: 1, gap: 2 }}>
           <T v="subheading">{lot.name}</T>
           <View style={row.gap}>
-            <T v="caption" color={full ? c.warn : c.text}>{full ? "Full" : `~${lot.available} open`}</T>
+            <T v="caption" color={full ? c.warn : c.text}>{full ? `Full · ${lot.snow_adjusted_capacity}/${lot.snow_adjusted_capacity} taken` : `~${lot.available} of ${lot.snow_adjusted_capacity} open`}</T>
             <T v="caption">· {Math.round(lot.occupancy_pct)}% full</T>
-            {lot.data_source === "demo" ? <Badge tone="warn">Demo scan</Badge> : <Badge>{sourceLabel(lot.data_source)}</Badge>}
+            {lot.data_source === "demo" ? <Badge tone="warn">Demo data</Badge> : <Badge>{sourceLabel(lot.data_source)}</Badge>}
           </View>
         </View>
         <IconButton onPress={onClose} label="Close"><X size={18} color={c.textMuted} /></IconButton>
