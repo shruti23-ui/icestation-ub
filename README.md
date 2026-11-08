@@ -102,17 +102,3 @@ cd mobile && npx tsc --noEmit
   The key lives only in `backend/.env`; the app streams MP3 from `/api/voice/briefing` and `/api/voice/lot/{id}`.
 - NOAA GOES-19 and NWS need **no key**, just internet.
 
-## Judge demo script (90 seconds)
-1. **Overview.** "Four North Campus lots, snow-adjusted capacity, confidence on every number." Tap a lot on the map → **Directions**.
-2. Tap **Demo → Start.** Narrate as steps tick:
-   - "A student scans Jarvis A. Cars counted, stalls classified: open, occupied, buried in snow. People and plates are blurred before anything is stored."
-   - "Submitted. Every phone at this table just updated."
-   - "Now the deep-space part: GOES-19 frames, labelled simulated for the demo. OpenCV finds a lake-effect band, optical flow tracks it toward Buffalo, ETA under 60 minutes. With the NWS warning, the satellite engine flips ice season on by itself."
-   - "Capacity drops, leave-by times pad, and an ice pin appears between Jarvis A and Davis Hall."
-3. Close the demo: **the accent turns amber** for ice season. Open **Plan**: new best lot and leave-by time; tap **Listen** for the spoken briefing.
-4. Open **Walkways**: toggle a route check; "blocked ramps are hard stops, and we never call a route safe without data."
-5. Hand a judge a phone: **Scan → Camera** on anything, or **Leaving now**.
-6. **Reset data** for the next judge.
-
-Honesty notes for judges: WeParkit predicts and informs; it never reserves a space.
-Occupancy is from student reports or a seed model, not live UB Parking data.
