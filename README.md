@@ -1,4 +1,4 @@
-# WeParkit 🛰️❄️
+# WeParkit 
 
 **Parking that knows it's winter in Buffalo.** UB Hacking 2026 · Theme: Deep Space
 
