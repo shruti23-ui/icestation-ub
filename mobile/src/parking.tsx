@@ -2,11 +2,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AppState, Linking } from "react-native";
 import { api, type ParkingSession } from "./api";
 import { decide, lotAt, metersBetween, type Fix } from "./parkDetect";
 import { useStore } from "./store";
 
-const AUTO_KEY = "icestation_auto_detect";
+const AUTO_KEY = "weparkit_auto_detect";
+const LEGACY_AUTO_KEY = "icestation_auto_detect";  // pre-rename key, read once
 const CAMPUS_RADIUS_M = 2500;   // farther than this from every UB lot = not on North Campus
 // "Yes, I'm parked" is the student telling us they're parked, so accept the nearest UB lot this close
 // even if GPS puts them just outside its outline (big lots, GPS drift, parked at the edge).
@@ -48,6 +50,8 @@ export function ParkingProvider({ children }: { children: ReactNode }) {
   const { user, lots, refresh, toast } = useStore();
   const [session, setSession] = useState<ParkingSession | null>(null);
   const [autoDetect, setAuto] = useState(false);
+  const autoRef = useRef(false);
+  autoRef.current = autoDetect;
   const [gps, setGps] = useState<Gps>("starting");
   const [hereLotId, setHere] = useState<number | null>(null);
   const [nearest, setNearest] = useState<Parking["nearest"]>(null);
@@ -67,7 +71,7 @@ export function ParkingProvider({ children }: { children: ReactNode }) {
   // Location is the core of the main page, so ask as soon as the app opens (unless the user turned it off).
   useEffect(() => {
     (async () => {
-      const saved = await AsyncStorage.getItem(AUTO_KEY).catch(() => null);
+      const saved = (await AsyncStorage.getItem(AUTO_KEY).catch(() => null)) ?? (await AsyncStorage.getItem(LEGACY_AUTO_KEY).catch(() => null));
       if (saved === "off") { setGps("off"); return; }
       const perm = await Location.requestForegroundPermissionsAsync().catch(() => null);
       if (perm?.granted) setAuto(true);
@@ -140,11 +144,36 @@ export function ParkingProvider({ children }: { children: ReactNode }) {
 
   const setAutoDetect = useCallback(async (on: boolean) => {
     await AsyncStorage.setItem(AUTO_KEY, on ? "on" : "off").catch(() => {});
-    if (!on) { setAuto(false); return; }
-    const perm = await Location.requestForegroundPermissionsAsync().catch(() => null);
-    if (!perm?.granted) { setGps("denied"); setAuto(false); toast("Location access is off. Enable it in Settings.", "error"); return; }
+    if (!on) { setAuto(false); setGps("off"); return; }
+    let perm = await Location.getForegroundPermissionsAsync().catch(() => null);
+    if (!perm?.granted && perm?.canAskAgain !== false) perm = await Location.requestForegroundPermissionsAsync().catch(() => null);
+    if (!perm?.granted) {
+      setGps("denied"); setAuto(false);
+      // The OS won't show the prompt again once location was denied: send the student to Settings.
+      // When they come back, the AppState listener below picks the new permission up.
+      if (perm && !perm.canAskAgain) {
+        toast("Location is blocked for this app. Turn it on in Settings, then come back.", "info");
+        Linking.openSettings().catch(() => {});
+      } else {
+        toast("Location access is off. Choose your lot from the list instead.", "info");
+      }
+      return;
+    }
+    setGps("starting");
     setAuto(true);
   }, [toast]);
+
+  // Back from Settings with location allowed? Start auto-detect without another tap.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", async (st) => {
+      if (st !== "active" || autoRef.current) return;
+      const saved = await AsyncStorage.getItem(AUTO_KEY).catch(() => null);
+      if (saved === "off") return;
+      const perm = await Location.getForegroundPermissionsAsync().catch(() => null);
+      if (perm?.granted) { setGps("starting"); setAuto(true); }
+    });
+    return () => sub.remove();
+  }, []);
 
   /** Turn a GPS position into a fix, update "where am I", and (optionally) run auto check-in/out. */
   const ingest = useCallback((pos: Location.LocationObject, detect: boolean) => {

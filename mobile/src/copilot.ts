@@ -2,7 +2,7 @@ import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, 
 import * as Haptics from "expo-haptics";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Linking } from "react-native";
-import { askCopilot, directionsUrl, type CopilotAnswer } from "./api";
+import { askCopilot, lotDirectionsUrl, type CopilotAnswer } from "./api";
 import { useStore } from "./store";
 import { useVoice } from "./voice";
 
@@ -95,8 +95,8 @@ export function useCopilot(opts: { destination: string; arrival?: string; access
       push("assistant", res.answer, res.answered_by === "gemini" ? "Gemini" : undefined);
       o.current.onAnswer?.(res);
       setPhase("speaking");
-      await voice.play(res.speech_path, "copilot");
-      if (res.action === "directions" && res.lot) Linking.openURL(directionsUrl(res.lot.lat, res.lot.lng)).catch(() => {});
+      if (res.speech_path) await voice.play(res.speech_path, "copilot");
+      if (res.action === "directions" && res.lot) Linking.openURL(lotDirectionsUrl(res.lot)).catch(() => {});
       return res;
     } catch (e) {
       toast((e as Error).message, "error");

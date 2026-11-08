@@ -6,6 +6,7 @@ used as an open TTS proxy.
 """
 from __future__ import annotations
 
+import logging
 import secrets
 import threading
 import time
@@ -26,6 +27,7 @@ from ..services.engine import display_reason
 from ..services.lot_state import get_state, is_ice, lot_status
 from .parking import compute_recommendation
 
+log = logging.getLogger("weparkit.voice")
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 settings = get_settings()
 
@@ -71,27 +73,37 @@ def status():
 
 @router.get("/briefing")
 def briefing(destination: str = Query("Davis Hall"), arrival: str | None = Query(None, description="HH:MM 24h"),
-             accessible: bool = False, text_only: bool = False, db: Session = Depends(get_db)):
-    """Speaks the current parking recommendation. `text_only=true` returns the script without calling ElevenLabs."""
-    return _out(voice.briefing_text(compute_recommendation(db, destination, arrival, accessible)), text_only)
+             accessible: bool = False, text_only: bool = False, intro: bool = False, drive: bool = False,
+             db: Session = Depends(get_db)):
+    """Speaks the current parking recommendation. `text_only=true` returns the script without calling ElevenLabs.
+    `intro=true` (drive mode opening) adds a greeting and the gesture options."""
+    rec = compute_recommendation(db, destination, arrival, accessible)
+    text = voice.drive_intro_text(rec) if intro else voice.drive_briefing_text(rec) if drive else voice.briefing_text(rec)
+    return _out(text, text_only)
 
 
 @router.get("/lot/{lot_id}")
-def lot(lot_id: int, text_only: bool = False, db: Session = Depends(get_db)):
+def lot(lot_id: int, text_only: bool = False, drive: bool = False, db: Session = Depends(get_db)):
     """Speaks one lot's current availability."""
     row = db.get(ParkingLot, lot_id)
     if not row:
         raise HTTPException(404, f"Lot {lot_id} not found")
-    return _out(voice.lot_text(lot_status(db, row, get_state(db))), text_only)
+    s = lot_status(db, row, get_state(db))
+    return _out(voice.drive_lot_text(s) if drive else voice.lot_text(s), text_only)
 
 
 # ------------------------------------------------------------------ co-pilot
 
 def _lot_ref(row: ParkingLot | None) -> dict | None:
-    return {"id": row.id, "slug": row.slug, "name": row.name, "lat": row.lat, "lng": row.lng} if row else None
+    if not row:
+        return None
+    from ..campus import ENTRANCES
+    return {"id": row.id, "slug": row.slug, "name": row.name, "lat": row.lat, "lng": row.lng,
+            "entrance": list(ENTRANCES.get(row.slug, (row.lat, row.lng)))}
 
 
-def answer(db: Session, intent: copilot.Intent, destination: str, arrival: str | None, accessible: bool) -> dict:
+def answer(db: Session, intent: copilot.Intent, destination: str, arrival: str | None, accessible: bool,
+           drive: bool = False) -> dict:
     """Server-written spoken answer for a parsed question. Honesty rules: estimates are called
     estimates, nothing is reserved, no route is called safe."""
     dest = intent.destination or destination
@@ -104,10 +116,10 @@ def answer(db: Session, intent: copilot.Intent, destination: str, arrival: str |
     action = None
 
     if intent.kind == "best":
-        text = voice.briefing_text(rec)
+        text = voice.drive_briefing_text(rec) if drive else voice.briefing_text(rec)
     elif intent.kind == "lot_status" and asked:
         s = lot_status(db, asked, state)
-        text = voice.lot_text(s)
+        text = voice.drive_lot_text(s) if drive else voice.lot_text(s)
         full = s["available"] <= max(2, s["snow_adjusted_capacity"] * 0.02)
         if best and best["slug"] != asked.slug and (full or s["occupancy_pct"] >= 90):
             text += f" For {dest}, {best['name']} is a better bet, with about {best['expected_open_spaces']} spaces."
@@ -187,6 +199,9 @@ async def ask(file: UploadFile | None = File(None, description="Short spoken que
               text: str | None = Form(None, description="Typed question; skips speech-to-text"),
               destination: str = Form("Davis Hall"), arrival: str | None = Form(None), accessible: bool = Form(False),
               conversation_id: str | None = Form(None, description="Returned by the previous turn; enables follow-ups"),
+              drive: bool = Form(False, description="Drive mode: short spoken answers"),
+              upload_id: str | None = Form(None, description="Recording sent in pieces via /api/parking/upload-chunk"),
+              wake: bool = Form(False, description="Hands-free: only answer when it starts with 'Hey Parky'"),
               db: Session = Depends(get_db)):
     """Conversational co-pilot: speech-to-text (ElevenLabs Scribe) -> intent (with follow-up memory) ->
     answer. Common questions get deterministic, data-backed answers; anything else goes to Gemini with live
@@ -195,14 +210,34 @@ async def ask(file: UploadFile | None = File(None, description="Short spoken que
         raise HTTPException(400, "Unknown destination")
     cid, convo = _convo(conversation_id)
     transcript = (text or "").strip()
-    if not transcript and file is not None:
+    if not transcript and (file is not None or upload_id):
+        if file is not None:
+            audio, name, ctype = await file.read(), file.filename or "question.m4a", file.content_type or "audio/mp4"
+        else:
+            from ..services import uploads
+            try:
+                audio, name, ctype = uploads.take(upload_id), "question.m4a", "audio/mp4"
+            except (KeyError, ValueError) as exc:
+                raise HTTPException(400, str(exc).strip("'\"")) from exc
         try:
-            transcript = voice.transcribe(await file.read(), file.filename or "question.m4a", file.content_type or "audio/mp4")
+            transcript = voice.transcribe(audio, name, ctype)
         except voice.VoiceError as exc:
             raise HTTPException(exc.status, str(exc)) from exc
     source = "rules"
+    if wake:
+        heard, rest = copilot.split_wake(transcript)
+        if not heard:   # background talk / radio: ignore silently, keep nothing
+            return {"transcript": transcript, "ignored": True, "intent": "none", "answer": "", "lot": None, "action": None,
+                    "destination": destination, "speech_path": None, "conversation_id": cid, "end_conversation": False,
+                    "answered_by": "rules", "listen_again": False}
+        if not rest:    # just "Hey Parky": answer and listen for the question
+            token = _remember("Yes? What can I help with?")
+            return {"transcript": transcript, "ignored": False, "intent": "wake", "answer": "Yes? What can I help with?",
+                    "lot": None, "action": None, "destination": destination, "speech_path": f"/api/voice/say/{token}",
+                    "conversation_id": cid, "end_conversation": False, "answered_by": "rules", "listen_again": True}
+        transcript = rest
     if not transcript:
-        if file is None:
+        if file is None and not upload_id:
             raise HTTPException(400, "Send a recording (file) or a typed question (text).")
         res = {"text": "Sorry, I didn't catch that. " + copilot.HELP_TEXT, "lot": None, "action": None, "destination": destination}
         intent = copilot.Intent("help")
@@ -216,14 +251,15 @@ async def ask(file: UploadFile | None = File(None, description="Short spoken que
             res = {"text": reply or copilot.HELP_TEXT, "lot": None, "action": None, "destination": intent.destination or destination}
             source = "gemini" if reply else "rules"
         else:
-            res = answer(db, intent, destination, arrival, accessible)
+            res = answer(db, intent, destination, arrival, accessible, drive)
         if res["lot"]:
             convo["lot"] = res["lot"]["slug"]
         convo["turns"] = (convo["turns"] + [(transcript, res["text"])])[-8:]
     token = _remember(res["text"])
     return {"transcript": transcript, "intent": intent.kind, "answer": res["text"], "lot": res["lot"],
             "action": res["action"], "destination": res["destination"], "speech_path": f"/api/voice/say/{token}",
-            "conversation_id": cid, "end_conversation": intent.kind == "end", "answered_by": source}
+            "conversation_id": cid, "end_conversation": intent.kind == "end", "answered_by": source,
+            "ignored": False, "listen_again": False}
 
 
 @router.get("/say/{token}")
@@ -248,7 +284,7 @@ def alert(kind: str = Query(..., pattern="^(ice_on|ice_off|lot_full)$"), lot_id:
         text = (f"Heads up. Ice season just switched on. Lot capacity is reduced and leave-by times now include "
                 f"{settings.ice_departure_buffer_min} extra minutes.")
         if best:
-            text += f" Best option now: {best['name']}, leave by {_clock(best['recommended_departure'])}."
+            text += f" Best option now: {best['name']}."
     elif kind == "ice_off":
         text = "Ice season has ended. Back to standard conditions."
     else:

@@ -1,4 +1,4 @@
-# CLAUDE.md: WeParkit (repo: icestation-ub)
+# CLAUDE.md: WeParkit
 
 Hackathon prototype (UB Hacking 2026, theme Deep Space). Satellite-triggered winter parking and
 walkway-safety app for UB North Campus. Read README.md for the product pitch and run steps.
@@ -30,6 +30,16 @@ walkway-safety app for UB North Campus. Read README.md for the product pitch and
   outlines, capacities estimated at ~32.7 m2/stall calibrated on OSM-tagged lots; CFT 400 is tagged). Names cross-checked
   with maps.buffalo.edu. Fixed: Jarvis A outline was Jarvis B; Center for Tomorrow is on Service Center Rd (south).
   Original 4 lots keep slugs/ids 1-4; startup sync inserts new lots and updates config fields.
+- **General object detector** (`services/vision/coco.py`): YOLOv4-tiny pre-trained on COCO (80 classes) via
+  `cv2.dnn` (no PyTorch), on the NVIDIA GPU via OpenCL when `VISION_DEVICE=auto|gpu` (RTX 2050: ~30 ms vs ~38 ms CPU;
+  warmed at startup since the first GPU pass compiles kernels ~6 s). Weights in `backend/data/models/` (gitignored; `python -m scripts.download_models`). Live
+  frames: model names objects; issue heuristics run only for parking scenes (model sees a vehicle, or mostly
+  pavement with no indoor objects). Scans: `get_detector()` = YOLOv8 > YOLOv4-tiny > OpenCV blobs, heuristics fill gaps.
+- **Issue detector** (`services/vision/issues.py`, tested in `tests/test_issues.py`): local OpenCV, no AI, ~40-70 ms.
+  Boxes + verdict for what makes a space unusable: car (3 finders: blob, rectangle body, outline + dark windows for
+  silver/white cars), ice/slush (snow detection removed 2026-11-08), standing water/black ice, cone/barrier (tapered, never on a car), grey
+  object in the way. Drives the live camera (`POST /api/parking/live-detect`, `LIVE_VISION_PROVIDER=opencv|gemini`),
+  adds `issues`/`verdict` to scans and hazard reports, and draws issue boxes on the annotated image.
 - Voice co-pilot is conversational: `conversation_id` memory, follow-ups, "thanks" ends, free-form -> Gemini
   (`services/llm.py`) with live data. App `src/copilot.ts`: VAD on recorder metering (adaptive noise floor).
 
@@ -51,9 +61,16 @@ npx expo install --fix                      # if Expo warns about versions
 - **Honesty labels are a product requirement.** Anything simulated is labelled in data *and* UI:
   `is_demo` flags, `source` = `simulated` / `goes19_live` / `archived_frames`, DEMO tags, "SIMULATED SATELLITE FEED".
   Never present seed occupancy as live UB data. Never say a spot is reserved. Never call a route "safe".
+  **Exception (owner's decision, 2026-11-08): Drive mode** speaks/shows short driver lines with no data-source
+  footnotes (`drive_briefing_text`, `drive_lot_text`, `?drive=true`, `drive` on /ask) to avoid distraction.
+  Everywhere else keeps the labels.
 - **Vehicle count ≠ open spaces.** Open spaces come from `services/vision/spaces.py`
   (calibrated stall regions → area heuristic → Gemini). Keep it that way.
 - **Privacy first:** `vision/privacy.py` runs before any image is written. Raw uploads never touch disk.
+- **Image storage** (`services/media_store.py`, `GET /api/media`): hackathon default `CAPTURE_SAVE=true` keeps
+  privacy-blurred, annotated photos + JSON in `backend/data/captures/<date>/` ONLY when the student taps Capture in the live camera (preview frames are never saved; gitignored) and
+  `MEDIA_RETENTION_HOURS=0` (never delete). Production: `CAPTURE_SAVE=false`, `MEDIA_RETENTION_HOURS=24` (hourly
+  sweep of captures/ and uploads/).
 - **Pure logic is unit-tested:** `services/ice_season.py` and `services/recommendation.py` take no DB.
   Add tests in `backend/tests/` when changing them.
 - **Manual override ≠ automatic decision.** `SystemState.decision_source` is one of
@@ -67,13 +84,15 @@ npx expo install --fix                      # if Expo warns about versions
   `c.accent` flips blue → amber in ice season. Use the primitives in `mobile/src/components/ui.tsx`
   (Screen, Section, Card, List/ListRow, T, Button, Badge, DemoTag, Banner, Metrics, Field, Toggle...). Plain,
   sentence-case copy: no space role-play wording (mission control, cadet, beam, orbit) in UI or API strings.
-- Tabs: Overview · Plan · Scan · Walkways · Satellite. Profile (`crew.tsx`) opens from the header, not the tab bar.
+- All displayed times are New York time via `mobile/src/campusTime.ts` (live clock; never the device timezone).
+- Tabs: Overview · Capture (route `scan`) · Reports (route `ice`) · Weather (route `orbit`) (renamed 2026-11-08; Plan tab removed; top-3 recommendation lives on Overview via `components/Choice.tsx`). Satellite tab auto-analyzes each new live GOES-19 frame (on open + every 5 min) and hides simulated runs. Profile (`crew.tsx`) opens from the header, not the tab bar.
 - Voice: ElevenLabs key is **server-only** (`ELEVENLABS_API_KEY`). `services/voice.py` builds the spoken text itself
   (no open TTS proxy) and caches audio; mobile `src/voice.ts` streams `/api/voice/*` via expo-audio and falls back
   to the device voice (expo-speech) reading the same server script when ElevenLabs is off or unreachable.
 - Directions: `directionsUrl()` in `src/api.ts` opens Google Maps driving directions; `LotSheet` on both maps.
-- Drive mode (`app/drive.tsx`): full-screen gesture pad (tap/swipe ←→↑↓/long-press/shake), keep-awake, haptics.
-  Swipe down records 5 s → `/api/voice/ask`. Intents are parsed by `services/copilot.py` (pure, tested, keyword
+- Drive mode (`app/drive.tsx`): full-screen gesture pad (tap / swipe ←→↑↓; long-press and shake removed 2026-11-08), keep-awake, haptics.
+  Swipe down listens with VAD (live waveform; stops after a ~1.3 s pause) → `/api/voice/ask`. Questions are
+  swipe-down only ("Hey Parky" background listening was removed 2026-11-08; `wake=true` on /ask is unused). Intents are parsed by `services/copilot.py` (pure, tested, keyword
   rules, not an LLM); answers are server-written. Proactive alerts on ice-season flips and when the best lot fills.
   `src/voice.ts` falls back to expo-speech (device voice) reading the server script if ElevenLabs is off/unreachable.
 - API base URL: `mobile/src/config.ts` (EXPO_PUBLIC_API_URL → Metro host IP:8000 → emulator fallbacks).
@@ -118,6 +137,10 @@ Full docs at `/docs`.
 - Phones can't reach `localhost`; run uvicorn with `--host 0.0.0.0`. Keep `--timeout-graceful-shutdown 2`: without it `--reload` hangs while phones hold the /ws socket open.
 - Expo web from another device: `config.ts` uses `window.location.hostname:8000`; CORS allows private LAN origins via `CORS_ORIGIN_REGEX`.
 - Campus Wi-Fi may block device-to-device traffic; use a hotspot or tunnels.
+- Photo uploads (`upload()` in `mobile/src/api.ts`): native Expo `uploadAsync` multipart (photo shrunk to 1600 px) ->
+  on failure, base64 pieces of 48 KB to `POST /api/parking/upload-chunk` (memory only, `services/uploads.py`) and the
+  endpoint gets `upload_id`. eduroam passed small requests but dropped phone photo uploads. Client failures are
+  logged to the server via `POST /api/parking/client-log` (look for `weparkit.client` in the API log).
 - OpenCV 5 removed `CascadeClassifier`; `requirements.txt` installs 4.x so Haar face/plate blur works.
   The privacy module degrades gracefully either way.
 - `SIM_CLOCK=09:40` in `backend/.env` makes the seed model behave like a weekday morning for night-time demos.

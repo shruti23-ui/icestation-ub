@@ -43,22 +43,69 @@ def _fetch_live() -> dict:
     except Exception as exc:
         errors.append(f"alerts: {type(exc).__name__}")
     try:
-        r = httpx.get(f"https://api.weather.gov/stations/{settings.nws_station}/observations/latest", headers=headers, timeout=t)
+        # The last few hourly reports: the newest one sometimes lacks a field (e.g. temperature), so each field
+        # is taken from the most recent report that has it.
+        r = httpx.get(f"https://api.weather.gov/stations/{settings.nws_station}/observations",
+                      params={"limit": 4}, headers=headers, timeout=t)
         r.raise_for_status()
-        p = r.json().get("properties", {})
-        wind = (p.get("windSpeed") or {}).get("value")
-        obs = {
-            "temperature_c": (p.get("temperature") or {}).get("value"),
-            "wind_kph": round(wind, 1) if wind is not None else None,
-            "condition": p.get("textDescription") or "Unknown",
-            "observed_at": p.get("timestamp"),
-            "station": settings.nws_station,
-        }
+        reports = [f.get("properties", {}) for f in r.json().get("features", [])]
+        if reports:
+            obs = driver_observation(reports)
     except Exception as exc:
         errors.append(f"observation: {type(exc).__name__}")
     live_ok = not errors or (obs is not None or alerts)
     return {"alerts": alerts, "observation": obs, "errors": errors,
             "source": "nws_live" if live_ok and len(errors) < 2 else "unavailable"}
+
+
+_COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+
+
+def driver_observation(reports: list[dict]) -> dict:
+    """NWS station reports (newest first) -> what a driver cares about, plus plain advice. Pure; unit-tested."""
+    def val(key: str):
+        for p in reports:
+            v = (p.get(key) or {}).get("value")
+            if v is not None:
+                return v
+        return None
+    newest = reports[0]
+    temp, chill, heat = val("temperature"), val("windChill"), val("heatIndex")
+    wind, gust, wdir, vis, hum = val("windSpeed"), val("windGust"), val("windDirection"), val("visibility"), val("relativeHumidity")
+    cond = newest.get("textDescription") or next((p.get("textDescription") for p in reports if p.get("textDescription")), "") or "Unknown"
+    feels = chill if chill is not None else heat if heat is not None else temp
+    c = cond.lower()
+    precip = next((w for w in ("freezing rain", "sleet", "snow", "rain", "drizzle", "fog") if w in c), None)
+    advice = []
+    if temp is not None and temp <= 1 and (precip or (hum or 0) >= 85):
+        advice.append("Near or below freezing with moisture: watch for black ice, especially on ramps and lot entrances.")
+    elif temp is not None and temp <= 1:
+        advice.append("Near or below freezing: bridges and shaded lots can be icy.")
+    if precip in ("snow", "sleet", "freezing rain"):
+        advice.append(f"{precip.capitalize()} reported: leave extra time and braking distance.")
+    elif precip in ("rain", "drizzle"):
+        advice.append("Wet roads: allow extra braking distance.")
+    if vis is not None and vis < 1600:
+        advice.append(f"Low visibility ({vis / 1000:.1f} km): use headlights and slow down.")
+    elif precip == "fog":
+        advice.append("Fog reported: use low beams.")
+    if (gust or 0) >= 50 or (wind or 0) >= 40:
+        advice.append("Strong wind: expect gusts on open stretches like the Stadium and Center for Tomorrow lots.")
+    if not advice:
+        advice.append("No weather concerns for driving right now.")
+    f = lambda c_: round(c_ * 9 / 5 + 32) if c_ is not None else None
+    return {
+        "temperature_c": round(temp, 1) if temp is not None else None, "temperature_f": f(temp),
+        "feels_like_c": round(feels, 1) if feels is not None else None, "feels_like_f": f(feels),
+        "condition": cond, "precipitation": precip,
+        "wind_kph": round(wind) if wind is not None else None, "wind_mph": round(wind / 1.609) if wind is not None else None,
+        "gust_kph": round(gust) if gust is not None else None, "gust_mph": round(gust / 1.609) if gust is not None else None,
+        "wind_dir": _COMPASS[int((wdir % 360) / 45 + 0.5) % 8] if wdir is not None else None,
+        "visibility_km": round(vis / 1000, 1) if vis is not None else None,
+        "visibility_mi": round(vis / 1609.34, 1) if vis is not None else None,
+        "humidity_pct": round(hum) if hum is not None else None,
+        "advice": advice, "observed_at": newest.get("timestamp"), "station": settings.nws_station,
+    }
 
 
 def current(force: bool = False) -> dict:
@@ -106,8 +153,10 @@ def inject_demo_storm(hours: float = 3.0) -> None:
         "severity": "Moderate", "onset": iso(now), "ends": iso(now + timedelta(hours=hours)),
         "winter": True, "demo": True, "source": "WeParkit demo",
     }
-    _demo["observation"] = {"temperature_c": -6.0, "wind_kph": 32.0, "condition": "Light snow (DEMO)",
-                            "observed_at": iso(now), "station": "DEMO"}
+    _demo["observation"] = {**driver_observation([{
+        "temperature": {"value": -6.0}, "windChill": {"value": -13.0}, "windSpeed": {"value": 32.0}, "windGust": {"value": 52.0},
+        "windDirection": {"value": 250}, "visibility": {"value": 1200}, "relativeHumidity": {"value": 92},
+        "textDescription": "Light snow (DEMO)", "timestamp": iso(now)}]), "station": "DEMO"}
     _demo["until"] = now + timedelta(hours=hours)
 
 

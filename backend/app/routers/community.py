@@ -42,15 +42,32 @@ def routes(destination: str = Query("Davis Hall"), db: Session = Depends(get_db)
         for l in db.scalars(select(ParkingLot).order_by(ParkingLot.id))]}
 
 
+def _pin_name(lat: float, lng: float) -> str:
+    """Readable name for a dropped pin: the nearest building, lot or named walkway within 250 m."""
+    from ..campus import BUILDINGS, LOTS
+    from ..services.geo import nearest_place
+    places = ([{"name": n, "lat": la, "lng": ln} for n, (la, ln) in BUILDINGS.items()]
+              + [{"name": l["name"], "lat": l["lat"], "lng": l["lng"]} for l in LOTS] + list(HAZARD_LOCATIONS))
+    near = nearest_place(lat, lng, places, max_m=250)
+    return f"Near {near['name']}" if near else f"Pinned spot ({lat:.5f}, {lng:.5f})"
+
+
 @hazard_router.post("/report")
-async def report_hazard(location_name: str = Form(...), category: str = Form("auto"), user_id: int | None = Form(None),
+async def report_hazard(location_name: str | None = Form(None), category: str = Form("auto"), user_id: int | None = Form(None),
                         lat: float | None = Form(None), lng: float | None = Form(None),
                         file: UploadFile | None = File(None), sample_id: str | None = Form(None),
-                        is_demo: bool = Form(False), db: Session = Depends(get_db)):
-    loc = next((l for l in HAZARD_LOCATIONS if l["name"] == location_name), None)
-    if loc is None and (lat is None or lng is None):
-        raise HTTPException(400, "Pick a listed campus location or send lat/lng.")
-    lat, lng = (loc["lat"], loc["lng"]) if loc else (lat, lng)
+                        upload_id: str | None = Form(None), is_demo: bool = Form(False),
+                        description: str | None = Form(None), db: Session = Depends(get_db)):
+    # A dropped pin (lat/lng) is the source of truth; a listed spot name is the fallback.
+    if lat is not None and lng is not None:
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            raise HTTPException(400, "Invalid pin location.")
+        location_name = (location_name or "").strip()[:120] or _pin_name(lat, lng)
+    else:
+        loc = next((l for l in HAZARD_LOCATIONS if l["name"] == location_name), None)
+        if loc is None:
+            raise HTTPException(400, "Drop a pin on the map (or pick a listed campus location).")
+        lat, lng = loc["lat"], loc["lng"]
     if category != "auto" and category not in HAZARD_CATEGORIES:
         raise HTTPException(400, f"category must be 'auto' or one of {HAZARD_CATEGORIES}")
 
@@ -62,6 +79,12 @@ async def report_hazard(location_name: str = Form(...), category: str = Form("au
         data = p.read_bytes()
     elif file is not None:
         data = await file.read()
+    elif upload_id:
+        from ..services import uploads
+        try:
+            data = uploads.take(upload_id)
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(400, str(exc).strip("'\"")) from exc
 
     ai = None
     if data:
@@ -69,16 +92,19 @@ async def report_hazard(location_name: str = Form(...), category: str = Form("au
             ai = classify_hazard_image(data)
         except ImageError as exc:
             raise HTTPException(400, str(exc)) from exc
+    description = (description or "").strip()[:200]
+    if category == "auto" and description and not ai:
+        category = hz.category_from_text(description)   # typed it instead of tapping a suggestion
     if category == "auto":
         if not ai:
-            raise HTTPException(400, "AI classification needs a photo. Attach one or pick a category.")
+            raise HTTPException(400, "Describe the hazard or pick a type.")
         if ai["category"] == "clear":
             return {"created": False, "ai": ai, "message": "The photo looks clear, so no hazard pin was created."}
         cat, conf, by, why = ai["category"], ai["confidence"], ai["classified_by"], ai["explanation"]
     else:
         cat, by = category, "reporter"
         conf = 0.7 if not ai else (min(0.9, 0.7 + 0.15 * ai["confidence"]) if ai["category"] == category else 0.6)
-        why = "Reported by a student." + (f" AI saw: {ai['category']} ({round(ai['confidence']*100)}%)." if ai else "")
+        why = (description or "Reported by a student.") + (f" (Photo check: {ai['category']}, {round(ai['confidence']*100)}%.)" if ai else "")
 
     user = db.get(User, user_id) if user_id else None
     h = HazardReport(user_id=user.id if user else None, location_name=location_name, lat=lat, lng=lng, category=cat,

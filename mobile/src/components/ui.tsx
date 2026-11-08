@@ -1,8 +1,9 @@
-import { Children, Fragment, isValidElement, type ReactNode } from "react";
+import { Children, Fragment, isValidElement, useState, type ReactNode } from "react";
 import {
-  ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View,
+  ActivityIndicator, FlatList, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View,
   type StyleProp, type TextInputProps, type TextStyle, type ViewStyle,
 } from "react-native";
+import { Check, ChevronDown, Search, X } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useStore } from "../store";
 import { radius, space } from "../theme";
@@ -255,6 +256,65 @@ export function Input({ label, value, onChangeText, placeholder, secure, keyboar
   );
 }
 
+/** Dropdown: a field that opens a searchable list in a bottom sheet. */
+export function Select<V extends string>({ label, placeholder = "Choose…", value, options, onChange, title }: {
+  label?: string; placeholder?: string; value: V | null; options: { value: V; label: string; hint?: string }[];
+  onChange: (v: V) => void; title?: string;
+}) {
+  const { c } = useStore();
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const current = options.find((o) => o.value === value);
+  const shown = q.trim() ? options.filter((o) => o.label.toLowerCase().includes(q.trim().toLowerCase())) : options;
+  const close = () => { setOpen(false); setQ(""); };
+  return (
+    <View style={{ gap: 6 }}>
+      {label ? <T v="label">{label}</T> : null}
+      <Pressable onPress={() => setOpen(true)} accessibilityRole="button" accessibilityLabel={`${label ?? title ?? "Choose"}: ${current?.label ?? "none"}`}
+        style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: space.sm, minHeight: 48, paddingHorizontal: space.md,
+          borderRadius: radius.md, backgroundColor: pressed ? c.surfaceAlt : c.surfaceSolid, borderWidth: StyleSheet.hairlineWidth * 2,
+          borderColor: current ? c.accent : c.border })}>
+        <Text style={{ flex: 1, color: current ? c.text : c.textFaint, fontSize: 16 }} numberOfLines={1}>{current?.label ?? placeholder}</Text>
+        <ChevronDown size={18} color={c.textMuted} />
+      </Pressable>
+      <Modal visible={open} transparent animationType="slide" onRequestClose={close}>
+        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.55)" }} onPress={close} accessibilityLabel="Close list" />
+        <View style={{ maxHeight: "75%", backgroundColor: c.surfaceSolid, borderTopLeftRadius: radius.lg + 4, borderTopRightRadius: radius.lg + 4,
+          borderWidth: StyleSheet.hairlineWidth * 2, borderColor: c.border, paddingBottom: space.xl }}>
+          <View style={[row.between, { padding: space.lg, paddingBottom: space.sm }]}>
+            <T v="subheading">{title ?? label ?? "Choose"}</T>
+            <IconButton onPress={close} label="Close"><X size={20} color={c.text} /></IconButton>
+          </View>
+          {options.length > 8 && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, marginHorizontal: space.lg, marginBottom: space.sm,
+              paddingHorizontal: space.md, borderRadius: radius.md, backgroundColor: c.surfaceAlt }}>
+              <Search size={16} color={c.textMuted} />
+              <TextInput value={q} onChangeText={setQ} placeholder="Search" placeholderTextColor={c.textFaint} autoCorrect={false}
+                autoCapitalize="none" style={{ flex: 1, color: c.text, fontSize: 16, paddingVertical: 10 }} accessibilityLabel="Search list" />
+            </View>
+          )}
+          <FlatList data={shown} keyExtractor={(o) => o.value} keyboardShouldPersistTaps="handled"
+            ListEmptyComponent={<T v="caption" style={{ padding: space.lg }}>No matches.</T>}
+            renderItem={({ item }) => {
+              const on = item.value === value;
+              return (
+                <Pressable onPress={() => { onChange(item.value); close(); }} accessibilityRole="button" accessibilityState={{ selected: on }}
+                  style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: space.md, paddingHorizontal: space.lg, paddingVertical: 13,
+                    backgroundColor: pressed ? c.surfaceAlt : on ? c.accentSoft : "transparent" })}>
+                  <View style={{ flex: 1 }}>
+                    <T v="body" color={on ? c.accent : c.text}>{item.label}</T>
+                    {item.hint ? <T v="caption">{item.hint}</T> : null}
+                  </View>
+                  {on && <Check size={18} color={c.accent} />}
+                </Pressable>
+              );
+            }} />
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
 export function Segmented<V extends string>({ options, value, onChange }: {
   options: { value: V; label: string }[]; value: V; onChange: (v: V) => void;
 }) {
@@ -275,13 +335,18 @@ export function Segmented<V extends string>({ options, value, onChange }: {
   );
 }
 
-export function Chips<V extends string>({ options, value, onChange }: {
-  options: { value: V; label: string }[]; value: V | null; onChange: (v: V) => void;
+/** Selectable chips. `limit` shows only the first few (plus the selected one) with a "Load more" chip. */
+export function Chips<V extends string>({ options, value, onChange, limit }: {
+  options: { value: V; label: string }[]; value: V | null; onChange: (v: V) => void; limit?: number;
 }) {
   const { c } = useStore();
+  const [shown, setShown] = useState(limit ?? Infinity);
+  const capped = shown < options.length;
+  const visible = capped ? options.filter((o, i) => i < shown || o.value === value) : options;
+  const more = limit != null && options.length > limit;
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
-      {options.map((o) => {
+      {visible.map((o) => {
         const on = o.value === value;
         return (
           <Pressable key={o.value} onPress={() => onChange(o.value)} accessibilityRole="button" accessibilityState={{ selected: on }}
@@ -291,6 +356,12 @@ export function Chips<V extends string>({ options, value, onChange }: {
           </Pressable>
         );
       })}
+      {more && (
+        <Pressable onPress={() => setShown(capped ? Math.min(shown + (limit ?? 6), options.length) : (limit ?? 6))} accessibilityRole="button"
+          style={{ borderRadius: radius.md, paddingHorizontal: space.md, paddingVertical: 7 }}>
+          <Text style={{ color: c.accent, fontSize: 13, fontWeight: "600" }}>{capped ? `Load more (${options.length - shown})` : "Show fewer"}</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -308,15 +379,15 @@ export function ProgressBar({ pct, color, height = 4 }: { pct: number; color?: s
 }
 
 /** A row of key figures separated by hairlines. */
-export function Metrics({ items }: { items: { label: string; value: ReactNode; color?: string }[] }) {
+export function Metrics({ items, center }: { items: { label: string; value: ReactNode; color?: string }[]; center?: boolean }) {
   const { c } = useStore();
   return (
     <Card padded={false} style={{ flexDirection: "row" }}>
       {items.map((m, i) => (
         <View key={m.label} style={{ flex: 1, paddingVertical: space.md + 2, paddingHorizontal: space.md,
-          borderLeftWidth: i ? StyleSheet.hairlineWidth * 2 : 0, borderLeftColor: c.divider, gap: 2 }}>
+          borderLeftWidth: i ? StyleSheet.hairlineWidth * 2 : 0, borderLeftColor: c.divider, gap: 2, alignItems: center ? "center" : undefined }}>
           <T v="metric" color={m.color} style={{ fontSize: 20 }}>{m.value}</T>
-          <T v="caption" numberOfLines={1}>{m.label}</T>
+          <T v="caption" numberOfLines={1} style={center ? { textAlign: "center" } : undefined}>{m.label}</T>
         </View>
       ))}
     </Card>

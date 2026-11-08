@@ -30,6 +30,7 @@ function Gate() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="demo" options={{ presentation: "modal" }} />
         <Stack.Screen name="notifications" options={{ presentation: "modal" }} />
+        <Stack.Screen name="report-hazard" options={{ presentation: "modal" }} />
         <Stack.Screen name="drive" options={{ presentation: "fullScreenModal", animation: "fade" }} />
       </Stack>
     </ParkingProvider>

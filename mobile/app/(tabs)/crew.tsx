@@ -8,6 +8,7 @@ import Header from "../../src/components/Header";
 import { Alien } from "../../src/components/SpaceArt";
 import { Badge, Button, Card, Empty, List, ListRow, Metrics, Section, Screen, T, Toggle, row } from "../../src/components/ui";
 import { useStore } from "../../src/store";
+import { useParking } from "../../src/parking";
 import { space } from "../../src/theme";
 
 const ACTIONS: Record<string, string> = {
@@ -17,6 +18,7 @@ const ACTIONS: Record<string, string> = {
 
 export default function Profile() {
   const { c, user, notifications, refresh, toast, setUser } = useStore();
+  const pk = useParking();
   const auth = useAuth();
   const [board, setBoard] = useState<CrewUser[]>([]);
   const [busy, setBusy] = useState<number | null>(null);
@@ -66,7 +68,13 @@ export default function Profile() {
       </Section>
 
       <Section title="Help requests">
-        {requests.length === 0 ? <Empty art={<Alien size={52} />} title="No open requests">If your car is stuck, request help from the Plan tab.</Empty> : (
+        <Button title="My car is stuck: request help" variant="secondary" loading={busy === -1} onPress={async () => {
+          if (!user) return;
+          setBusy(-1);
+          try { const r = await api.assist({ user_id: user.id, lot_id: pk.session?.lot?.id ?? undefined }); toast(r.message ?? "Help requested"); refresh("notifications"); }
+          catch (e) { toast((e as Error).message, "error"); } finally { setBusy(null); }
+        }} />
+        {requests.length === 0 ? <Empty art={<Alien size={52} />} title="No open requests">Students who are stuck in snow show up here.</Empty> : (
           <Card padded={false}>
             <List>
               {requests.map((n) => (
@@ -110,7 +118,7 @@ export default function Profile() {
               ))}
             </List>
           </Card>
-        ) : <T v="caption" style={{ paddingHorizontal: space.xs }}>Scan a lot or report a hazard to earn your first points.</T>}
+        ) : <T v="caption" style={{ paddingHorizontal: space.xs }}>Capture a lot or report a hazard to earn your first points.</T>}
       </Section>
     </Screen>
   );

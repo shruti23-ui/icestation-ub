@@ -1,16 +1,18 @@
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams } from "expo-router";
-import { Camera, CircleCheck, ImageIcon, Minus, Plus, ShieldCheck } from "lucide-react-native";
+import { Camera, CircleCheck, ScanEye, ImageIcon, Minus, Plus, ShieldCheck } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { Image, Pressable, ScrollView, View } from "react-native";
 import { api, media, type Hazard, type PickedImage, type Sample, type ScanResult } from "../../src/api";
 import GpsRow from "../../src/components/GpsRow";
 import Header from "../../src/components/Header";
+import LiveScan, { ISSUE_COLOR } from "../../src/components/LiveScan";
 import {
-  Badge, Banner, Button, Card, Chips, DemoTag, ErrorNote, Field, IconButton, List, ListRow, ProgressBar, Section, Screen, Segmented, T, row,
+  Badge, Banner, Button, Card, Chips, DemoTag, ErrorNote, Field, IconButton, List, ListRow, ProgressBar, Section, Screen, Segmented, StatusDot, T, row,
 } from "../../src/components/ui";
 import { useLotLocator } from "../../src/location";
+import { useParking } from "../../src/parking";
 import { useStore } from "../../src/store";
 import { radius, space } from "../../src/theme";
 
@@ -26,8 +28,8 @@ export default function Scan() {
   const { c, lots, meta, user, state, refresh, toast } = useStore();
   const [mode, setMode] = useState<"lot" | "hazard">("lot");
   const [lotId, setLotId] = useState<number | null>(null);
-  const [samples, setSamples] = useState<Sample[]>([]);
   const [source, setSource] = useState<Source>(null);
+  const [live, setLive] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
@@ -40,16 +42,21 @@ export default function Scan() {
   const [hazard, setHazard] = useState<Hazard | null>(null);
 
   useEffect(() => { if (params.mode === "ice") setMode("hazard"); }, [params.mode]);
-  useEffect(() => { api.samples().then((d) => setSamples(d.samples)).catch(() => {}); }, []);
   useEffect(() => { if (!lotId && lots?.lots.length) setLotId(lots.lots[0].id); }, [lots, lotId]);
 
   // GPS identifies the lot / nearest walkway. A manual pick always wins.
   const gps = useLotLocator();
+  // Checked in ("Yes, I'm parked")? That lot is queued up automatically. Order: your pick > where you parked > GPS.
+  const pk = useParking();
+  const parkedLot = pk.session?.active ? pk.session.lot : null;
+  useEffect(() => {
+    if (parkedLot && !handPicked.lot) setLotId(parkedLot.id);
+  }, [parkedLot?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [handPicked, setHandPicked] = useState({ lot: false, location: false });
   useEffect(() => {
     const r = gps.result;
     if (!r) return;
-    if (r.lot && !handPicked.lot) setLotId(r.lot.id);
+    if (r.lot && !handPicked.lot && !parkedLot) setLotId(r.lot.id);
     if (r.hazard_location && !handPicked.location) setLocation(r.hazard_location.name);
   }, [gps.result]); // eslint-disable-line react-hooks/exhaustive-deps
   const relocate = () => { setHandPicked({ lot: false, location: false }); gps.locate(); };
@@ -107,13 +114,12 @@ export default function Scan() {
     finally { setBusy(false); }
   };
 
-  const visibleSamples = samples.filter((s) => (mode === "lot" ? s.kind !== "hazard" : s.kind === "hazard"));
   const preview = source?.kind === "photo" ? source.image.uri : source ? media(source.sample.image_url) : null;
   const lotName = lots?.lots.find((l) => l.id === lotId)?.name;
   const done = !!(result || hazard);
 
   return (
-    <Screen header={<Header title="Scan" subtitle="Report lot occupancy or a walkway hazard from a photo" />}>
+    <Screen header={<Header title="Capture" subtitle="Photograph a lot to update its spaces, or a walkway to report a hazard" />}>
       <Segmented options={[{ value: "lot", label: "Parking lot" }, { value: "hazard", label: "Walkway hazard" }]} value={mode} onChange={switchMode} />
 
       {!done && (
@@ -122,8 +128,10 @@ export default function Scan() {
             <Section title="Lot" footer="Matched from your location when available. Tap to correct it.">
               <Card style={{ gap: space.md }}>
                 <GpsRow status={gps.status} result={gps.result} error={gps.error} onLocate={relocate}
+                  override={parkedLot && parkedLot.id === lotId ? `You're parked at ${parkedLot.name}` : undefined}
+                  showConfidence={!(parkedLot && parkedLot.id === lotId)}
                   matchedName={gps.result?.lot && gps.result.lot.id === lotId ? gps.result.lot.name : null} />
-                <Chips options={(lots?.lots ?? []).map((l) => ({ value: String(l.id), label: l.name }))} value={lotId ? String(lotId) : null}
+                <Chips limit={6} options={(lots?.lots ?? []).map((l) => ({ value: String(l.id), label: l.name }))} value={lotId ? String(lotId) : null}
                   onChange={(v) => { setLotId(Number(v)); setHandPicked((p) => ({ ...p, lot: true })); resetFlow(); }} />
               </Card>
             </Section>
@@ -136,7 +144,7 @@ export default function Scan() {
                     label={gps.result?.hazard_location
                       ? `${Math.round(gps.result.hazard_location.distance_m)} m from ${gps.result.hazard_location.name}`
                       : gps.result?.on_campus ? "No named spot within 150 m. Pick the closest." : "You're not on North Campus."} />
-                  <Chips options={(meta?.hazard_locations ?? []).map((h) => ({ value: h.name, label: h.name }))} value={location}
+                  <Chips limit={4} options={(meta?.hazard_locations ?? []).map((h) => ({ value: h.name, label: h.name }))} value={location}
                     onChange={(v) => { setLocation(v); setHandPicked((p) => ({ ...p, location: true })); }} />
                 </Card>
               </Section>
@@ -148,7 +156,10 @@ export default function Scan() {
 
           <Section title="Photo" footer={mode === "lot" ? "Fit as many stalls in frame as you can. Faces and plates are blurred before anything is stored." : "Show the walking surface clearly."}>
             <Card style={{ gap: space.md }}>
-              {preview ? (
+              {live ? (
+                <LiveScan onClose={() => setLive(false)}
+                  onCapture={(img) => { setLive(false); resetFlow(); setSource({ kind: "photo", image: img }); }} />
+              ) : preview ? (
                 <View style={{ gap: space.sm }}>
                   <Image source={{ uri: preview }} style={{ width: "100%", aspectRatio: 1.5, borderRadius: radius.md, backgroundColor: c.surfaceAlt }} resizeMode="contain" />
                   {source?.kind === "sample" && <DemoTag label="Synthetic sample photo" />}
@@ -159,29 +170,15 @@ export default function Scan() {
                   <T v="caption">No photo selected</T>
                 </View>
               )}
-              <View style={row.gap}>
+              {!live && mode === "lot" && (
+                <Button title="Live camera with object boxes" icon={<ScanEye size={16} color={c.onAccent} />} onPress={() => setLive(true)} />
+              )}
+              {!live && <View style={row.gap}>
                 <Button title="Camera" variant="secondary" icon={<Camera size={16} color={c.text} />} onPress={() => pick(true)} style={{ flex: 1 }} />
                 <Button title="Library" variant="secondary" icon={<ImageIcon size={16} color={c.text} />} onPress={() => pick(false)} style={{ flex: 1 }} />
-              </View>
+              </View>}
             </Card>
           </Section>
-
-          {visibleSamples.length > 0 && (
-            <Section title="Or try a sample">
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm }}>
-                {visibleSamples.map((s) => {
-                  const on = source?.kind === "sample" && source.sample.id === s.id;
-                  return (
-                    <Pressable key={s.id} onPress={() => { resetFlow(); setSource({ kind: "sample", sample: s }); }}
-                      style={{ width: 132, borderWidth: on ? 2 : 1, borderColor: on ? c.accent : c.border, borderRadius: radius.md, overflow: "hidden", backgroundColor: c.surface }}>
-                      <Image source={{ uri: media(s.image_url) }} style={{ width: "100%", height: 80 }} />
-                      <T v="caption" numberOfLines={1} style={{ padding: space.sm }}>{s.title}</T>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            </Section>
-          )}
 
           {err && <ErrorNote>{err}</ErrorNote>}
           <Button title={busy ? "Analyzing" : "Analyze photo"} onPress={analyze} loading={busy} disabled={!source} />
@@ -207,6 +204,21 @@ export default function Scan() {
               <Field label="Confidence" value={`${Math.round(result.confidence * 100)}%`} />
             </View>
           </Card>
+
+          {result.verdict && (
+            <Section title="Why spaces are unusable" footer={result.issues_method}>
+              <Card padded={false}>
+                <List>
+                  <ListRow left={<StatusDot color={result.verdict.blocked ? c.danger : result.verdict.usable ? c.success : c.warn} />}
+                    title={<T v="subheading">{result.verdict.headline}</T>} />
+                  {(result.issues ?? []).map((i, n) => (
+                    <ListRow key={n} left={<View style={{ width: 12, height: 12, borderRadius: 3, borderWidth: 2, borderColor: ISSUE_COLOR[i.kind] ?? c.danger }} />}
+                      title={i.label} subtitle={i.detail || undefined} right={<T v="caption">{Math.round(i.score * 100)}%</T>} />
+                  ))}
+                </List>
+              </Card>
+            </Section>
+          )}
 
           <Section title="Summary" footer={result.explanation_source}>
             <Card><T v="body">{result.explanation}</T></Card>

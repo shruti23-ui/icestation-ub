@@ -5,10 +5,20 @@ import { API_BASE } from "./config";
 import { useStore } from "./store";
 
 // One voice for the whole app: a new utterance always stops the previous one.
-let current: { id: string; stop: () => void } | null = null;
+let current: { id: string; token: number; stop: () => void } | null = null;
+let nextToken = 0;
 const listeners = new Set<(id: string | null) => void>();
 const announce = (id: string | null) => listeners.forEach((l) => l(id));
 let audioModeSet = false;
+
+// Device-voice fallback: prefer a soft English female voice when the phone has one (iOS Samantha/Ava/Karen,
+// Android en-us "sfg"/"tpc" female voices, Windows Zira). Falls back to the default voice.
+let gentleVoice: string | null = null;
+Speech.getAvailableVoicesAsync().then((vs) => {
+  const en = vs.filter((v) => /^en/i.test(v.language));
+  const pick = en.find((v) => /samantha|ava|allison|susan|karen|serena|zira|female|sfg|tpc/i.test(`${v.name} ${v.identifier}`));
+  gentleVoice = pick?.identifier ?? null;
+}).catch(() => {});
 
 const textUrl = (path: string) => `${API_BASE}${path}${path.includes("?") ? "&" : "?"}text_only=true`;
 
@@ -24,11 +34,13 @@ export function useVoice() {
 
   const play = useCallback((path: string, id: string = path) => new Promise<void>((resolve) => {
     current?.stop();
+    Speech.stop();                       // never let a device-voice line overlap the next one
+    const token = ++nextToken;           // identifies THIS utterance (ids repeat, e.g. every drive line is "drive")
     let finished = false;
     const finish = () => {
       if (finished) return;
       finished = true;
-      if (current?.id === id) { current = null; announce(null); }
+      if (current?.token === token) { current = null; announce(null); }
       resolve();
     };
 
@@ -39,18 +51,18 @@ export function useVoice() {
         text = r.ok ? ((await r.json()) as { text: string }).text : "";
       } catch { /* fall through */ }
       if (finished || !text) return finish();
-      Speech.speak(text, { rate: 1.0, onDone: finish, onStopped: finish, onError: finish });
+      Speech.speak(text, { rate: 1.05, pitch: 1.1, voice: gentleVoice ?? undefined, onDone: finish, onStopped: finish, onError: finish });
     };
 
     if (health?.voice_enabled === false) {
-      current = { id, stop: () => { Speech.stop(); finish(); } };
+      current = { id, token, stop: () => { Speech.stop(); finish(); } };
       announce(id);
       speakDevice();
       return;
     }
 
     // Register now so a stop() before the player exists still ends this utterance.
-    current = { id, stop: finish };
+    current = { id, token, stop: finish };
     announce(id);
     (async () => {
       if (!audioModeSet) {
@@ -60,16 +72,18 @@ export function useVoice() {
       if (finished) return;
       const player: AudioPlayer = createAudioPlayer({ uri: API_BASE + path });
       let loaded = false;
-      const cleanup = () => { clearTimeout(timeout); sub.remove(); player.remove(); };
+      // pause() first: on Android remove() alone can let the stream keep playing for a moment (overlapping voices).
+      const cleanup = () => { clearTimeout(timeout); sub.remove(); try { player.pause(); } catch { /* released */ } player.remove(); };
       // ElevenLabs outage / bad key = a stream that never loads: switch to the device voice.
       const timeout = setTimeout(() => {
-        if (!loaded && !finished) { cleanup(); current = { id, stop: () => { Speech.stop(); finish(); } }; speakDevice(); }
+        if (!loaded && !finished) { cleanup(); current = { id, token, stop: () => { Speech.stop(); finish(); } }; speakDevice(); }
       }, 8000);
       const sub = player.addListener("playbackStatusUpdate", (s) => {
         if (s.isLoaded) loaded = true;
         if (s.didJustFinish) { cleanup(); finish(); }
       });
-      current = { id, stop: () => { cleanup(); Speech.stop(); finish(); } };
+      if (current?.token !== token || finished) { cleanup(); return; }   // superseded while starting
+      current = { id, token, stop: () => { cleanup(); Speech.stop(); finish(); } };
       player.play();
     })();
   }), [health?.voice_enabled]);

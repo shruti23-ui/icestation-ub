@@ -183,3 +183,36 @@ def test_expire_hazards_reports_changes(client):
         assert expire_hazards(db) == 1
         assert expire_hazards(db) == 0
     assert client.get("/api/hazards").json()["hazards"] == []
+
+
+def test_hazard_report_from_dropped_pin_is_named_and_listed(client):
+    from app.campus import BUILDINGS
+    lat, lng = BUILDINGS["Capen Hall"]
+    r = client.post("/api/hazards/report", data={"lat": lat + 0.0002, "lng": lng, "category": "ice"}).json()
+    assert r["created"] and r["hazard"]["location_name"] == "Near Capen Hall"
+    assert abs(r["hazard"]["lat"] - (lat + 0.0002)) < 1e-6        # the pin itself, not a snapped spot
+    assert any(h["id"] == r["hazard"]["id"] for h in client.get("/api/hazards").json()["hazards"])
+    assert client.post("/api/hazards/report", data={"category": "ice"}).status_code == 400   # no pin, no place
+
+
+def test_demo_hazards_seeded_once_and_labelled(client, monkeypatch):
+    from app.config import get_settings
+    from app.database import SessionLocal
+    from app.seed import ensure_demo_hazards
+    monkeypatch.setattr(get_settings(), "demo_hazards", True)
+    with SessionLocal() as db:
+        ensure_demo_hazards(db)
+        ensure_demo_hazards(db)          # idempotent while they're active
+    demo = [h for h in client.get("/api/hazards").json()["hazards"] if h["is_demo"]]
+    assert len(demo) == 2 and {h["category"] for h in demo} == {"ice", "blocked_ramp"}
+
+
+def test_typed_hazard_description_sets_category_and_is_shown(client):
+    from app.services.hazards import category_from_text
+    assert category_from_text("Black ice by the stairs") == "ice"
+    assert category_from_text("plow pile blocking the curb ramp") == "blocked_ramp"
+    assert category_from_text("fallen branch on path") == "other"
+    r = client.post("/api/hazards/report", data={"lat": 43.0009, "lng": -78.7893, "category": "auto",
+                                                 "description": "Fallen branch across the path"}).json()
+    assert r["created"] and r["hazard"]["category"] == "other" and r["hazard"]["category_label"] == "Other hazard"
+    assert r["hazard"]["explanation"] == "Fallen branch across the path"

@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Footprints, Orbit, Route, ScanLine, Satellite } from "lucide-react-native";
+import { Camera, CloudSun, House, MessageSquareWarning } from "lucide-react-native";
 import type { ComponentType } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,11 +9,10 @@ type Icon = ComponentType<{ size?: number; color?: string; strokeWidth?: number 
 
 // Order matches the file routes below. `crew` is reachable from the header profile button, not the bar.
 const TABS: Record<string, { label: string; icon: Icon }> = {
-  index: { label: "Overview", icon: Orbit },
-  dock: { label: "Plan", icon: Route },
-  scan: { label: "Scan", icon: ScanLine },
-  ice: { label: "Walkways", icon: Footprints },
-  orbit: { label: "Satellite", icon: Satellite },
+  index: { label: "Overview", icon: House },
+  scan: { label: "Capture", icon: Camera },
+  ice: { label: "Reports", icon: MessageSquareWarning },
+  orbit: { label: "Weather", icon: CloudSun },
 };
 
 export default function TabLayout() {
@@ -23,7 +22,7 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: c.bg } }}
       tabBar={({ state, navigateToTab }) => (
-        <View style={{ flexDirection: "row", backgroundColor: "rgba(4,6,14,0.94)", borderTopColor: c.border, borderTopWidth: StyleSheet.hairlineWidth * 2,
+        <View style={{ flexDirection: "row", backgroundColor: "rgba(5,8,23,0.96)", borderTopColor: c.border, borderTopWidth: StyleSheet.hairlineWidth * 2,
           paddingTop: 8, paddingBottom: Math.max(insets.bottom, 8) }}>
           {state.routes.map((route, i) => {
             const cfg = TABS[route.name];
@@ -44,7 +43,6 @@ export default function TabLayout() {
       )}
     >
       <Tabs.Screen name="index" />
-      <Tabs.Screen name="dock" />
       <Tabs.Screen name="scan" />
       <Tabs.Screen name="ice" />
       <Tabs.Screen name="orbit" />

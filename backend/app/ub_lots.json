@@ -39,7 +39,12 @@
    "total_capacity": 32,
    "capacity_source": "area_estimate",
    "area_m2": 1063,
-   "osm": "way/724628436"
+   "osm": "way/724628436",
+   "entrance": [
+    43.000285,
+    -78.780176
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "alumni-b",
@@ -230,7 +235,12 @@
    "total_capacity": 156,
    "capacity_source": "area_estimate",
    "area_m2": 5095,
-   "osm": "way/640309928"
+   "osm": "way/640309928",
+   "entrance": [
+    43.001743,
+    -78.779403
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "alumni-c",
@@ -309,7 +319,12 @@
    "total_capacity": 66,
    "capacity_source": "area_estimate",
    "area_m2": 2158,
-   "osm": "way/640322864"
+   "osm": "way/640322864",
+   "entrance": [
+    43.001773,
+    -78.779404
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "arena-lot",
@@ -416,7 +431,12 @@
    "total_capacity": 253,
    "capacity_source": "area_estimate",
    "area_m2": 8274,
-   "osm": "way/640143357"
+   "osm": "way/640143357",
+   "entrance": [
+    43.000287,
+    -78.779822
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "baird-a",
@@ -491,7 +511,12 @@
    "total_capacity": 175,
    "capacity_source": "area_estimate",
    "area_m2": 5733,
-   "osm": "way/640409604"
+   "osm": "way/640409604",
+   "entrance": [
+    42.998288,
+    -78.785234
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "baird-lot",
@@ -606,7 +631,12 @@
    "total_capacity": 140,
    "capacity_source": "area_estimate",
    "area_m2": 4570,
-   "osm": "way/640409603"
+   "osm": "way/640409603",
+   "entrance": [
+    42.999205,
+    -78.784274
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "center-for-tomorrow",
@@ -725,7 +755,12 @@
    "total_capacity": 400,
    "capacity_source": "osm_tag",
    "area_m2": 12404,
-   "osm": "way/236504982"
+   "osm": "way/236504982",
+   "entrance": [
+    42.992761,
+    -78.793107
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "cooke-a",
@@ -756,7 +791,12 @@
    "total_capacity": 115,
    "capacity_source": "area_estimate",
    "area_m2": 3774,
-   "osm": "way/641269767"
+   "osm": "way/641269767",
+   "entrance": [
+    42.999283,
+    -78.793721
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "cooke-b",
@@ -863,7 +903,12 @@
    "total_capacity": 218,
    "capacity_source": "area_estimate",
    "area_m2": 7113,
-   "osm": "way/641269781"
+   "osm": "way/641269781",
+   "entrance": [
+    42.99905,
+    -78.793719
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "fargo-lot",
@@ -918,7 +963,12 @@
    "total_capacity": 531,
    "capacity_source": "area_estimate",
    "area_m2": 17362,
-   "osm": "way/639515153"
+   "osm": "way/639515153",
+   "entrance": [
+    43.006853,
+    -78.787686
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "fronczak-a",
@@ -957,7 +1007,12 @@
    "total_capacity": 277,
    "capacity_source": "area_estimate",
    "area_m2": 9045,
-   "osm": "way/640333249"
+   "osm": "way/640333249",
+   "entrance": [
+    43.002321,
+    -78.79149
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "fronczak-b",
@@ -1000,7 +1055,12 @@
    "total_capacity": 215,
    "capacity_source": "area_estimate",
    "area_m2": 7034,
-   "osm": "way/640333247"
+   "osm": "way/640333247",
+   "entrance": [
+    43.002322,
+    -78.791108
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "governors-a",
@@ -1043,7 +1103,12 @@
    "total_capacity": 134,
    "capacity_source": "area_estimate",
    "area_m2": 4377,
-   "osm": "way/640333248"
+   "osm": "way/640333248",
+   "entrance": [
+    43.00283,
+    -78.791113
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "governors-b",
@@ -1134,7 +1199,12 @@
    "total_capacity": 308,
    "capacity_source": "area_estimate",
    "area_m2": 10073,
-   "osm": "way/640333255"
+   "osm": "way/640333255",
+   "entrance": [
+    43.002149,
+    -78.793099
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "governors-c",
@@ -1173,7 +1243,12 @@
    "total_capacity": 244,
    "capacity_source": "area_estimate",
    "area_m2": 7970,
-   "osm": "way/639801632"
+   "osm": "way/639801632",
+   "entrance": [
+    43.004177,
+    -78.790159
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "governors-d",
@@ -1212,7 +1287,12 @@
    "total_capacity": 245,
    "capacity_source": "area_estimate",
    "area_m2": 8008,
-   "osm": "way/639801635"
+   "osm": "way/639801635",
+   "entrance": [
+    43.003463,
+    -78.791449
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "governors-e",
@@ -1359,7 +1439,12 @@
    "total_capacity": 258,
    "capacity_source": "area_estimate",
    "area_m2": 8429,
-   "osm": "way/639801638"
+   "osm": "way/639801638",
+   "entrance": [
+    43.003429,
+    -78.79469
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "hochstetter-b",
@@ -1438,7 +1523,12 @@
    "total_capacity": 378,
    "capacity_source": "area_estimate",
    "area_m2": 12352,
-   "osm": "way/641259627"
+   "osm": "way/641259627",
+   "entrance": [
+    42.998228,
+    -78.790935
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "hochstetter-lot",
@@ -1525,7 +1615,12 @@
    "total_capacity": 308,
    "capacity_source": "area_estimate",
    "area_m2": 10057,
-   "osm": "way/641259626"
+   "osm": "way/641259626",
+   "entrance": [
+    42.998221,
+    -78.792116
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "jacobs-b",
@@ -1604,7 +1699,12 @@
    "total_capacity": 149,
    "capacity_source": "area_estimate",
    "area_m2": 4867,
-   "osm": "way/641231903"
+   "osm": "way/641231903",
+   "entrance": [
+    42.998248,
+    -78.78672
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "jacobs-c",
@@ -1691,7 +1791,12 @@
    "total_capacity": 158,
    "capacity_source": "area_estimate",
    "area_m2": 5165,
-   "osm": "way/641231904"
+   "osm": "way/641231904",
+   "entrance": [
+    42.998288,
+    -78.785588
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "jacobs-lot",
@@ -1762,7 +1867,12 @@
    "total_capacity": 178,
    "capacity_source": "area_estimate",
    "area_m2": 5827,
-   "osm": "way/641231902"
+   "osm": "way/641231902",
+   "entrance": [
+    42.998241,
+    -78.787762
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "jarvis-a",
@@ -1793,7 +1903,12 @@
    "total_capacity": 305,
    "capacity_source": "area_estimate",
    "area_m2": 9980,
-   "osm": "way/639790337"
+   "osm": "way/639790337",
+   "entrance": [
+    43.004176,
+    -78.789126
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "jarvis-b",
@@ -1832,7 +1947,12 @@
    "total_capacity": 282,
    "capacity_source": "area_estimate",
    "area_m2": 9237,
-   "osm": "way/639790336"
+   "osm": "way/639790336",
+   "entrance": [
+    43.00352,
+    -78.786353
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "ketter-lot",
@@ -1871,7 +1991,12 @@
    "total_capacity": 107,
    "capacity_source": "area_estimate",
    "area_m2": 3484,
-   "osm": "way/640336082"
+   "osm": "way/640336082",
+   "entrance": [
+    43.002921,
+    -78.788785
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "lake-lasalle",
@@ -1930,7 +2055,12 @@
    "total_capacity": 186,
    "capacity_source": "area_estimate",
    "area_m2": 6097,
-   "osm": "way/640373781"
+   "osm": "way/640373781",
+   "entrance": [
+    43.001111,
+    -78.780893
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "red-jacket",
@@ -1997,7 +2127,12 @@
    "total_capacity": 143,
    "capacity_source": "area_estimate",
    "area_m2": 4670,
-   "osm": "way/639502165"
+   "osm": "way/639502165",
+   "entrance": [
+    43.008892,
+    -78.788184
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "richmond-lot-north",
@@ -2100,7 +2235,12 @@
    "total_capacity": 142,
    "capacity_source": "area_estimate",
    "area_m2": 4636,
-   "osm": "way/639502200"
+   "osm": "way/639502200",
+   "entrance": [
+    43.010689,
+    -78.785902
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "richmond-lot-south",
@@ -2343,7 +2483,12 @@
    "total_capacity": 496,
    "capacity_source": "area_estimate",
    "area_m2": 16214,
-   "osm": "way/639502201"
+   "osm": "way/639502201",
+   "entrance": [
+    43.010571,
+    -78.786514
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "slee-a",
@@ -2522,7 +2667,12 @@
    "total_capacity": 278,
    "capacity_source": "area_estimate",
    "area_m2": 9098,
-   "osm": "way/640409605"
+   "osm": "way/640409605",
+   "entrance": [
+    42.998207,
+    -78.782251
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "slee-b",
@@ -2593,7 +2743,12 @@
    "total_capacity": 162,
    "capacity_source": "area_estimate",
    "area_m2": 5284,
-   "osm": "way/640409602"
+   "osm": "way/640409602",
+   "entrance": [
+    42.999171,
+    -78.783911
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "spaulding-lot",
@@ -2860,7 +3015,12 @@
    "total_capacity": 521,
    "capacity_source": "area_estimate",
    "area_m2": 17027,
-   "osm": "way/639502181"
+   "osm": "way/639502181",
+   "entrance": [
+    43.011087,
+    -78.784476
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "special-event",
@@ -2891,7 +3051,12 @@
    "total_capacity": 215,
    "capacity_source": "area_estimate",
    "area_m2": 7044,
-   "osm": "way/640119244"
+   "osm": "way/640119244",
+   "entrance": [
+    42.997904,
+    -78.784187
+   ],
+   "entrance_source": "osm_road_crossing"
   },
   {
    "slug": "stadium",
@@ -2962,7 +3127,12 @@
    "total_capacity": 202,
    "capacity_source": "area_estimate",
    "area_m2": 6615,
-   "osm": "way/640138909"
+   "osm": "way/640138909",
+   "entrance": [
+    42.997962,
+    -78.780406
+   ],
+   "entrance_source": "osm_road_crossing"
   }
  ]
 }

@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { Bell, BellDot, X } from "lucide-react-native";
+import { Bell, BellDot, House, X } from "lucide-react-native";
 import { useContext, useRef, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { ParkingContext } from "../parking";
@@ -10,8 +10,14 @@ import { T } from "./ui";
 
 const SIZE = 40;
 
-/** Screen title with notifications and profile actions. Modals pass `onClose` instead. */
-export default function Header({ title, subtitle, onClose, brand }: { title: string; subtitle?: string; onClose?: () => void; brand?: boolean }) {
+/** Leave any stacked screen (modal) and land on the Overview tab. */
+export function goHome() {
+  if (router.canDismiss()) router.dismissAll();
+  router.navigate("/");
+}
+
+/** Screen title with notifications and profile actions. Modals pass `onClose` (X) or `home` (Home button) instead. */
+export default function Header({ title, subtitle, onClose, brand, home }: { title: string; subtitle?: string; onClose?: () => void; brand?: boolean; home?: boolean }) {
   const { c, unread, toast } = useStore();
   const taps = useRef(0);
   const ping = () => {
@@ -19,15 +25,25 @@ export default function Header({ title, subtitle, onClose, brand }: { title: str
     if (taps.current % 5 === 0) toast("👽 Greetings, earthling. Take me to your parking lot.", "info");
   };
   return (
-    <View style={{ paddingHorizontal: space.lg, paddingTop: space.sm, paddingBottom: space.md, flexDirection: "row", alignItems: "center", gap: space.sm }}>
+    <View style={{ paddingHorizontal: space.lg, paddingTop: space.sm, paddingBottom: space.md, flexDirection: "row", alignItems: "center", gap: space.md }}>
+      {home && (
+        // Top-left, where people look for "back".
+        <Pressable onPress={goHome} accessibilityRole="button" accessibilityLabel="Go to home" hitSlop={6}
+          style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 6, height: SIZE, paddingHorizontal: 14, borderRadius: SIZE / 2,
+            backgroundColor: pressed ? c.surfaceAlt : c.surface, borderWidth: StyleSheet.hairlineWidth * 2, borderColor: c.border,
+            transform: [{ scale: pressed ? 0.96 : 1 }] })}>
+          <House size={18} color={c.accent} />
+          <Text style={{ color: c.text, fontSize: 14, fontWeight: "600" }}>Home</Text>
+        </Pressable>
+      )}
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
           {brand && <Pressable onPress={ping} hitSlop={8} accessibilityLabel="WeParkit logo"><Logo /></Pressable>}
           <T v="title" numberOfLines={1}>{title}</T>
         </View>
-        {subtitle ? <T v="caption" numberOfLines={1} style={{ marginTop: 2 }}>{subtitle}</T> : null}
+        {subtitle ? <T v="caption" numberOfLines={2} style={{ marginTop: 2 }}>{subtitle}</T> : null}
       </View>
-      {onClose ? (
+      {home ? null : onClose ? (
         <RoundButton onPress={onClose} label="Close"><X size={20} color={c.text} /></RoundButton>
       ) : (
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>

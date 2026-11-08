@@ -18,7 +18,8 @@ interface Store {
 }
 
 const Ctx = createContext<Store | null>(null);
-const USER_KEY = "icestation_user_id";
+const USER_KEY = "weparkit_user_id";
+const LEGACY_USER_KEY = "icestation_user_id";  // pre-rename key, read once
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [lots, setLots] = useState<LotsResponse | null>(null);
@@ -43,7 +44,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const dismiss = useCallback((id: number) => setToasts((t) => t.filter((x) => x.id !== id)), []);
 
   const loadUser = useCallback(async () => {
-    const stored = Number(await AsyncStorage.getItem(USER_KEY)) || null;
+    const stored = Number((await AsyncStorage.getItem(USER_KEY)) ?? (await AsyncStorage.getItem(LEGACY_USER_KEY))) || null;
     const u = await api.me(stored);
     await AsyncStorage.setItem(USER_KEY, String(u.id));
     setUser(u);
@@ -81,7 +82,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refresh("lots", "state", "hazards", "notifications", "weather", "meta", "health", "crew");
     // health is polled too: it carries voice availability and must recover if launch-time fetch failed.
-    const t = setInterval(() => refresh("lots", "state", "hazards", "notifications", "health"), 15000);
+    const t = setInterval(() => refresh("lots", "state", "hazards", "notifications", "health", "meta"), 15000);
     const sub = AppState.addEventListener("change", (s) => { if (s === "active") refresh(); });
     return () => { clearInterval(t); sub.remove(); };
   }, [refresh]);

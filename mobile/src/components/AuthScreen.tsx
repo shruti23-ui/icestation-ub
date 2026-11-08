@@ -83,7 +83,7 @@ export default function AuthScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: space.xl, gap: space.xl }} keyboardShouldPersistTaps="handled">
           <View style={{ alignItems: "center", gap: space.sm }}>
-            <Logo size={56} />
+            <Logo size={76} />
             <T v="title" style={{ fontSize: 34 }}>WeParkit</T>
             <T v="body" color={c.textMuted} style={{ textAlign: "center" }}>UB parking at North Campus</T>
           </View>

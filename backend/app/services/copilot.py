@@ -122,3 +122,27 @@ def parse(text: str, buildings: list[str], lots: list[tuple[str, str]] | None = 
 HELP_TEXT = ("You can ask: where should I park, is Hochstetter full, when should I leave, "
              "is it icy, or take me to Stadium Lot.")
 END_TEXT = "Okay. Drive carefully, and tap the mic whenever you need me."
+
+
+# Wake phrase for hands-free drive mode: "Hey Parky". Speech-to-text hears it many ways ("hey parkie", "hi parky",
+# "hey park key", "a party", "hey parking", "okay perky", "hey paki"), sometimes after a filler word or a sound tag
+# like "(engine noise)". In a busy room the clip also contains other people's talk, so "Hey Parky" can be anywhere:
+#   - greeting + name ("hey parkie", "hi parky", "okay perky") counts anywhere; the question is what follows the LAST one
+#   - the bare name counts only as the first word, and plain "parking" never counts on its own
+_GREETING = r"(?:hey|hi|hay|hai|heyy|ok|okay|yo|hello)"
+_NAME = r"(?:park[\s-]+(?:key|ee|e|y|ie|i)|parkie|parkey|parky|parki|parkee|perky|porky|barky|pakki|paki|parking|party)"
+_WAKE_ANY = re.compile(rf"\b{_GREETING}[\s,.!-]*{_NAME}\b[\s,.!?-]*", re.IGNORECASE)
+_WAKE_START = re.compile(rf"^\W*(?:{_NAME})\b[\s,.!?-]*", re.IGNORECASE)
+_NOISE = re.compile(r"[\(\[][^\)\]]*[\)\]]")   # "(engine noise)", "[music]"
+
+
+def split_wake(transcript: str) -> tuple[bool, str]:
+    """(said the wake phrase?, the rest of the sentence after it). Pure; tested."""
+    text = re.sub(r"\s+", " ", _NOISE.sub(" ", transcript or "")).strip()
+    hits = list(_WAKE_ANY.finditer(text))
+    if hits:
+        return True, text[hits[-1].end():].strip()
+    m = _WAKE_START.match(text)
+    if m and not m.group(0).strip(" ,.!?-").lower().startswith(("parking", "party")):
+        return True, text[m.end():].strip()
+    return False, transcript or ""

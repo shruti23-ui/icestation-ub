@@ -10,6 +10,7 @@ from ...config import DATA_DIR
 from . import gemini
 from .base import Box
 from .detectors import get_detector, surface_masks
+from .issues import detect_issues
 from .privacy import apply_privacy_blur
 from .spaces import estimate_by_area, estimate_with_regions, snow_cover_fraction
 
@@ -70,6 +71,17 @@ def analyze_parking(data: bytes, lot_name: str, regions: dict | None = None) -> 
     img, scale = decode_image(data)
     detector = get_detector()
     det = detector.detect(img)
+    # Local issue detector (cars, ice, water, cones, objects). With the classical detector, its extra
+    # car finder (rectangle-shaped bodies, white cars with dark windows) fills in cars the blob detector missed.
+    found = detect_issues(img)
+    if True:   # always: the trained models don't know top-down/synthetic views; heuristics fill the gaps
+        h, w = img.shape[:2]
+        for i in found["issues"]:
+            if i["kind"] != "vehicle":
+                continue
+            b = Box(int(i["box"][0] * w), int(i["box"][1] * h), int(i["box"][2] * w), int(i["box"][3] * h), "car", float(i["score"]))
+            if not any(_iou(b, v) > 0.3 for v in det.vehicles):
+                det.vehicles.append(b)
 
     # Privacy first: nothing unblurred is ever written.
     blurred, n_blur, blur_methods = apply_privacy_blur(img, det.vehicles, det.people)
@@ -123,8 +135,10 @@ def analyze_parking(data: bytes, lot_name: str, regions: dict | None = None) -> 
                               else "Rule-based summary of the measurements (Gemini not configured)")
         explanation = " ".join(bits)
 
+    # Why spaces are unusable: drawn from the issue detector run above.
     banner = f"{lot_name} | {len(det.vehicles)} vehicles | {space.open_spaces} open est. | {det.provider}"
     annotated = _annotate(blurred, det.vehicles, space.regions, banner)
+    _draw_issues(annotated, found["issues"])
 
     return {
         "lot_name": lot_name,
@@ -149,6 +163,9 @@ def analyze_parking(data: bytes, lot_name: str, regions: dict | None = None) -> 
         "frame_occupancy_fraction": round(frame_occ, 3),
         "frame_snow_blocked_fraction": round(snow_frac, 3),
         "boxes": [v.as_dict() for v in det.vehicles],
+        "issues": [i for i in found["issues"] if i["kind"] != "vehicle"],
+        "verdict": found["verdict"],
+        "issues_method": found["method"],
         "privacy": {"regions_blurred": n_blur, "methods": blur_methods},
         "blurred_image_url": _save(blurred, "blurred"),
         "annotated_image_url": _save(annotated, "annotated"),
@@ -169,8 +186,34 @@ def classify_hazard_image(data: bytes) -> dict:
             "explanation": g.get("explanation", ""), "classified_by": "gemini_vision",
             "image_url": _save(blurred, "hazard"), "privacy": {"regions_blurred": n_blur, "methods": methods},
         }
+    found = detect_issues(img)
     return {**heuristic_hazard(img), "image_url": _save(blurred, "hazard"),
-            "privacy": {"regions_blurred": n_blur, "methods": methods}}
+            "privacy": {"regions_blurred": n_blur, "methods": methods},
+            "issues": [i for i in found["issues"] if i["kind"] != "vehicle"], "verdict": found["verdict"]}
+
+
+ISSUE_BGR = {"ice": (255, 200, 80), "water": (180, 120, 40), "cone": (0, 140, 255), "object": (60, 60, 230)}
+
+
+def _draw_issues(img: np.ndarray, issues: list[dict]) -> None:
+    """Outline each blocking issue on the annotated image with its label."""
+    h, w = img.shape[:2]
+    for i in issues:
+        if i["kind"] == "vehicle":
+            continue
+        x1, y1, x2, y2 = (int(i["box"][0] * w), int(i["box"][1] * h), int(i["box"][2] * w), int(i["box"][3] * h))
+        col = ISSUE_BGR.get(i["kind"], (60, 60, 230))
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 0), 4)
+        cv2.rectangle(img, (x1, y1), (x2, y2), col, 2)
+        cv2.putText(img, i["label"], (x1 + 3, max(14, y1 + 14)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(img, i["label"], (x1 + 3, max(14, y1 + 14)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1, cv2.LINE_AA)
+
+
+def _iou(a: Box, b: Box) -> float:
+    ix = max(0, min(a.x2, b.x2) - max(a.x1, b.x1)); iy = max(0, min(a.y2, b.y2) - max(a.y1, b.y1))
+    inter = ix * iy
+    union = (a.x2 - a.x1) * (a.y2 - a.y1) + (b.x2 - b.x1) * (b.y2 - b.y1) - inter
+    return inter / union if union else 0.0
 
 
 def heuristic_hazard(img: np.ndarray) -> dict:
